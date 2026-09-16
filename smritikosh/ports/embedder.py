@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from abc import ABC, abstractmethod
 
 __all__ = ["Embedder"]
@@ -37,6 +38,10 @@ class Embedder(ABC):
         their context window should override this.
         """
         return _CONSERVATIVE_MAX_TOKENS
+
+    def count_tokens(self, text: str) -> int:
+        """Count model tokens, conservatively when no tokenizer is exposed."""
+        return math.ceil(len(text) / 2.5) + 2
 
     @abstractmethod
     def encode_documents(self, texts: list[str]) -> list[list[float]]: ...
