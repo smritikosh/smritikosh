@@ -253,21 +253,24 @@ print(1)
 """
 
 
-def test_should_capture_markdown_sections_with_their_body_text() -> None:
+def test_should_capture_markdown_headings_and_code_blocks() -> None:
     assert _capture_names("markdown", MARKDOWN) == {
         "definition.section",
         "definition.code_block",
     }
 
 
-def test_should_capture_the_markdown_section_body_not_just_the_heading() -> None:
+def test_should_capture_markdown_heading_nodes_without_recursive_body_text() -> None:
     lang = get_language("markdown")
     root = Parser(lang).parse(MARKDOWN.encode("utf-8")).root_node
     captures = QueryCursor(Query(lang, _query_text("markdown"))).captures(root)
 
     sections = captures["definition.section"]
 
-    assert any(b"Intro prose." in node.text for node in sections)
+    assert [node.text.rstrip() for node in sections] == [
+        b"# Title",
+        b"## Section Two",
+    ]
 
 
 JSON = """
