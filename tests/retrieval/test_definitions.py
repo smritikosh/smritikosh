@@ -99,6 +99,34 @@ def test_should_leave_a_chunk_that_covers_no_single_definition_alone() -> None:
     assert reader.calls == [], "a chunk naming no definition needs no outline"
 
 
+def test_should_keep_distinct_chunks_from_the_same_markdown_section() -> None:
+    """Every chunk of a split section carries the same heading as its symbol."""
+    reader = _Reader({})
+
+    located = complete_definitions(
+        [
+            _candidate(
+                "Transaction_System.md",
+                20,
+                42,
+                symbol="Transaction Lifecycle Management",
+                chunk_kind="section",
+            ),
+            _candidate(
+                "Transaction_System.md",
+                43,
+                46,
+                symbol="Transaction Lifecycle Management",
+                chunk_kind="section",
+            ),
+        ],
+        reader=reader,
+        options=HybridSearchOptions(),
+    )
+
+    assert _spans(located) == [(20, 42), (43, 46)]
+
+
 def test_should_keep_the_original_span_when_the_outline_has_no_match() -> None:
     """A stale or rebuilt index can hold a chunk the outline no longer names."""
     reader = _Reader({"src/flow.py": [OutlineEntry("save", "function", 1, 300)]})
