@@ -48,7 +48,7 @@ FAST_TESTS := tests/engine/ tests/models/ tests/ports/ \
 	tests/adapters/vector_store/ tests/adapters/file_source/ \
 	tests/adapters/storage/ tests/adapters/retrieval/ \
 	tests/adapters/embedder/test_make_embedder.py \
-	tests/queries/ tests/indexing/ \
+	tests/queries/ tests/indexing/ tests/retrieval/ \
 	tests/test_cli.py \
 	tests/test_exploration.py tests/test_exploration_cli.py
 
