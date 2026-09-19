@@ -22,6 +22,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   `smritikosh.exploration` still exports `ReadOnlyExplorer`, now an alias of the adapter.
 - `CODE_OF_CONDUCT.md`, `SECURITY.md`, issue and pull request templates, and a contributor
   guide covering environment setup, the architecture boundary, and what CI enforces.
+- `explore chunks --range PATH START END`, repeatable, so several ranges are read in one
+  process instead of one process per range.
 
 ### Changed
 
@@ -29,6 +31,16 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   `clear_caches`, and `VectorStore` gains `clear`. A third-party adapter that does not
   implement them will no longer instantiate. `VectorStore.delete_many` is new as well but
   defaults to looping over `delete`, so it needs nothing from existing implementations.
+- **Breaking.** `smritikosh explore` is now three subcommands — `search`, `chunks`, and
+  `tools` — and `info`, `paths`, and `text` are gone. One subcommand per reader method
+  pushed the choice of how to explore onto the agent and cost a round trip per decision;
+  `tools` states the workflow and its limits so an agent can start without a prompt that
+  describes them.
+- **Breaking.** `explore search` fuses dense and BM25 candidates for a question's facets
+  and returns locations without any source, leaving the agent to read only the ranges it
+  judges worth reading through `explore chunks --range`. `--top-k`, `--include-path`,
+  `--exclude-path`, and `--full` are gone from `search`; `--max-results` bounds the page
+  instead, at up to 24.
 
 ### Fixed
 

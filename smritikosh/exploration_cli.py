@@ -2,60 +2,33 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import asdict
-from typing import Final, cast
 
 import click
 import toons
 
 from smritikosh.adapters.embedder import make_embedder
+from smritikosh.adapters.retrieval.duckdb import (
+    DuckDBBm25Store,
+    DuckDBDenseRetriever,
+    DuckDBLexicalRetriever,
+)
+from smritikosh.adapters.retrieval.source import DuckDBSourceReader
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.exploration import (
     IndexedChunk,
     OutlineEntry,
     ReadOnlyExplorer,
-    SearchOptions,
     SourceLine,
-    TextMatch,
 )
-from smritikosh.models import SearchResult
+from smritikosh.models import HybridSearchOptions, SearchLocation
+from smritikosh.ports.embedder import Embedder
+from smritikosh.retrieval.service import HybridSearchService
 
 __all__ = ["explore"]
 
-TOOL_MANIFEST: Final[dict[str, object]] = {
-    "version": 2,
-    "flow": (
-        "search returns locations; read one with "
-        "chunks PATH --start-line N --end-line M. Two calls answer most "
-        "questions."
-    ),
-    # One line per tool: the manifest is read by an agent on every session, so
-    # its own size is a cost, and nested argument tables cost more than they
-    # explain about a command whose usage string already names its options.
-    "tools": {
-        "search": (
-            "explore search QUERY... [--top-k N] [--include-path LIKE] "
-            "[--exclude-path LIKE] [--full] — code by meaning; reports "
-            "locations, not code; loads the embedding model"
-        ),
-        "chunks": (
-            "explore chunks PATH [--start-line N] [--end-line M] [--full] — "
-            "outline a file, or print its source for a line range"
-        ),
-        "text": (
-            "explore text TEXT [--path PATH] [--limit N] — exact symbol or "
-            "string, as path:line: line"
-        ),
-        "paths": "explore paths PATTERN [--limit N] — paths containing a substring",
-        "info": "explore info — index size and embedding dimensions",
-    },
-    "notes": (
-        "Prefix every command with `smritikosh `. Output is TOON; --prose "
-        "switches to prose. All but tools take --db-path INDEX. Source "
-        "lines print as numbered text either way."
-    ),
-}
+MAX_QUERIES = 8
+MAX_QUERY_CHARS = 500
 
 
 def _echo_toon(value: object) -> None:
@@ -88,17 +61,6 @@ def _echo_outline(entries: list[OutlineEntry], *, path: str) -> None:
         click.echo(f"{span:<{width}}  {kind}  {name}")
 
 
-def _echo_text_matches(matches: list[TextMatch]) -> None:
-    if not matches:
-        click.echo("No matches found.")
-        return
-    for match in matches:
-        # "~" warns that the line sits somewhere in a chunk that cannot be
-        # mapped line by line, so the number is the chunk's start, not the hit.
-        marker: str = "" if match.exact_line else "~"
-        click.echo(f"{match.path}:{marker}{match.line_number}: {match.text}")
-
-
 def _echo_source_lines(lines: list[SourceLine], *, path: str) -> None:
     if not lines:
         click.echo("No source lines found.")
@@ -109,45 +71,184 @@ def _echo_source_lines(lines: list[SourceLine], *, path: str) -> None:
         click.echo(f"{line.line_number:>{width}}  {line.text}")
 
 
-def _result_payload(result: SearchResult, *, full: bool) -> dict[str, object]:
-    """Serialize one hit, carrying its code only when it was asked for."""
-    payload: dict[str, object] = asdict(result)
-    # Cosine scores separate hits in the third decimal at most; the float's
-    # remaining sixteen digits are tokens spent on noise.
-    payload["score"] = round(result.score, 3)
-    if not full:
-        del payload["snippet"]
-    return payload
-
-
-def _echo_location(result: SearchResult) -> None:
-    kind: str = f"  {result.chunk_kind}" if result.chunk_kind else ""
-    symbol: str = f"  {result.symbol}" if result.symbol else ""
-    click.echo(
-        f"{result.path}:{result.start_line}-{result.end_line}  "
-        f"{result.score:.3f}{kind}{symbol}"
-    )
-
-
-def _echo_results(
-    results: list[SearchResult],
+def _search_payload(
+    locations: list[SearchLocation],
     *,
-    elapsed_ms: float,
-    full: bool,
+    queries: tuple[str, ...],
+) -> dict[str, object]:
+    """Render located definitions as two compact TOON tables.
+
+    Facets are labelled by query id rather than repeated in full: every row
+    would otherwise carry the whole query text it matched.
+    """
+    labels: dict[str, str] = {
+        query: f"Q{index}" for index, query in enumerate(queries, start=1)
+    }
+    return {
+        "queries": [{"id": labels[query], "query": query} for query in labels],
+        "search_results": [
+            {
+                "path": location.path,
+                "start_line": location.start_line,
+                "end_line": location.end_line,
+                "symbol": location.symbol or "",
+                "facets": "|".join(labels[facet] for facet in location.facets),
+            }
+            for location in locations
+        ],
+    }
+
+
+def _echo_search_prose(
+    locations: list[SearchLocation],
+    *,
+    queries: tuple[str, ...],
 ) -> None:
-    if not results:
-        click.echo(f"No results found.  ({elapsed_ms:.0f} ms)")
+    labels: dict[str, str] = {
+        query: f"Q{index}" for index, query in enumerate(queries, start=1)
+    }
+    for query, label in labels.items():
+        click.echo(f"{label}  {query}")
+    click.echo()
+    if not locations:
+        click.echo("No results found.")
         return
-    click.echo(f"Found {len(results)} result(s) in {elapsed_ms:.0f} ms:\n")
-    for result in results:
-        _echo_location(result)
-        # Code is what `chunks --start-line` is for. Shipping it with every
-        # hit was three quarters of a search result, and a caller that means
-        # to read one of them pays for the other four.
-        if full:
-            for line in result.snippet.splitlines():
-                click.echo(f"    {line}")
-            click.echo()
+    for location in locations:
+        symbol: str = f"  {location.symbol}" if location.symbol else ""
+        facets: str = "|".join(labels[facet] for facet in location.facets)
+        click.echo(
+            f"{location.path}:{location.start_line}-{location.end_line}"
+            f"{symbol}  {facets}"
+        )
+
+
+def _tools_payload() -> dict[str, object]:
+    """Describe the exploration workflow in compact, machine-readable rows."""
+    return {
+        "workflow": [
+            {
+                "step": 1,
+                "action": "search",
+                "instruction": "Pass 4-8 focused facets of one question.",
+            },
+            {
+                "step": 2,
+                "action": "chunks",
+                "instruction": "Read selected search_result paths and line ranges.",
+            },
+            {
+                "step": 3,
+                "action": "answer",
+                "instruction": "Cite the returned PATH:START-END evidence.",
+            },
+        ],
+        "tools": [
+            {
+                "name": "search",
+                "purpose": "Find relevant definitions and direct references.",
+                "usage": (
+                    "smritikosh explore search QUERY... "
+                    "--max-results 12 [--db-path PATH]"
+                ),
+                "returns": "TOON rows: path,start_line,end_line,symbol,facets",
+            },
+            {
+                "name": "chunks",
+                "purpose": "Read several exact source ranges in one process.",
+                "usage": (
+                    "smritikosh explore chunks "
+                    "--range PATH START END [--range PATH START END ...] "
+                    "[--db-path PATH]"
+                ),
+                "returns": "Numbered source lines grouped by PATH:START-END",
+            },
+            {
+                "name": "chunks",
+                "purpose": "List indexed definitions in one file.",
+                "usage": ("smritikosh explore chunks PATH [--db-path PATH]"),
+                "returns": "TOON outline rows with symbols and line ranges",
+            },
+        ],
+        "search_standards": [
+            {
+                "parameter": "QUERY count",
+                "start_with": "4",
+                "guidance": "Use one distinct facet per query; never repeat synonyms.",
+            },
+            {
+                "parameter": "QUERY facets",
+                "start_with": "flow|state|failure|tests",
+                "guidance": (
+                    "Include exact domain nouns, events, or symbols when known."
+                ),
+            },
+            {
+                "parameter": "--max-results",
+                "start_with": "12",
+                "guidance": (
+                    "Raise to 18, then 24 only when evidence categories are missing."
+                ),
+            },
+            {
+                "parameter": "--db-path",
+                "start_with": "the provided index path",
+                "guidance": "Set it explicitly when more than one index may exist.",
+            },
+        ],
+        "agent_guidance": [
+            "Follow search -> chunks -> answer.",
+            "Treat search results as candidates; verify material claims with chunks.",
+            "Batch independent reads with repeated --range and avoid overlaps.",
+            "Read relevant implementation and test bodies.",
+            (
+                "Target at most 12 Smritikosh CLI calls after tools; exceed only "
+                "to close material evidence gaps."
+            ),
+            (
+                "Trace relevant ownership, flow, conditions, and failure paths; "
+                "separate verified findings, assumptions, and unknowns."
+            ),
+            (
+                "Cite every material claim with a chunks-returned "
+                "portfolio-relative PATH:START-END."
+            ),
+            (
+                "Answer concisely with findings, flow, failure conditions, tests, "
+                "and unverified items."
+            ),
+        ],
+        "rules": [
+            {
+                "rule": (
+                    "Use --range PATH START END; do not also pass positional PATH, "
+                    "--start-line, --end-line, or --full."
+                )
+            },
+            {"rule": "Search returns locations only; use chunks to read source."},
+            {"rule": "TOON is the default; --toon is accepted for compatibility."},
+        ],
+    }
+
+
+def _echo_tools_prose() -> None:
+    """Print the exploration workflow for a human reader."""
+    click.echo("1. Search with 4-8 focused facets of one question:")
+    click.echo(
+        "   smritikosh explore search QUERY... --max-results 12 [--db-path PATH]"
+    )
+    click.echo("2. Read selected ranges (repeat --range to batch reads):")
+    click.echo(
+        "   smritikosh explore chunks --range PATH START END "
+        "[--range PATH START END ...] [--db-path PATH]"
+    )
+    click.echo("3. Cite the returned PATH:START-END evidence.")
+    click.echo()
+    click.echo("Agent guidance:")
+    for instruction in _tools_payload()["agent_guidance"]:
+        click.echo(f"- {instruction}")
+    click.echo()
+    click.echo("Do not combine --range with positional PATH, line options, or --full.")
+    click.echo("TOON is the default output format.")
 
 
 @click.group()
@@ -162,88 +263,26 @@ def explore() -> None:
     help="Print prose for a human instead of the default TOON rows.",
 )
 @click.option(
-    # Accepted and ignored: TOON is the default now, but these names are
-    # written into agent prompts that predate it, and failing those with
-    # "no such option" costs a whole turn to rediscover an unchanged command.
     "--toon",
-    "--json-output",
-    "--json_output",
     is_flag=True,
     hidden=True,
 )
 def list_tools(prose: bool, toon: bool) -> None:  # noqa: ARG001
-    """Describe exploration commands and the recommended agent workflow."""
-    if not prose:
-        _echo_toon(TOOL_MANIFEST)
+    """List commands, exact syntax, workflow, and composition rules."""
+    if prose:
+        _echo_tools_prose()
         return
-    click.echo(f"{TOOL_MANIFEST['flow']}\n")
-    tools: dict[str, str] = cast(dict[str, str], TOOL_MANIFEST["tools"])
-    for name, usage in tools.items():
-        click.echo(f"{name}: smritikosh {usage}")
-    click.echo(f"\n{TOOL_MANIFEST['notes']}")
-
-
-@explore.command("info")
-@click.option(
-    "--db-path",
-    "--db_path",
-    default=DEFAULT_DB_PATH,
-    show_default=True,
-    type=click.Path(exists=True, dir_okay=False),
-)
-@click.option(
-    "--prose",
-    is_flag=True,
-    help="Print prose for a human instead of the default TOON rows.",
-)
-@click.option(
-    # Accepted and ignored: TOON is the default now, but these names are
-    # written into agent prompts that predate it, and failing those with
-    # "no such option" costs a whole turn to rediscover an unchanged command.
-    "--toon",
-    "--json-output",
-    "--json_output",
-    is_flag=True,
-    hidden=True,
-)
-def index_info(db_path: str, prose: bool, toon: bool) -> None:  # noqa: ARG001
-    """Show indexed file, chunk, vector, and dimension counts."""
-    with ReadOnlyExplorer(db_path) as explorer:
-        info = explorer.index_info()
-    if not prose:
-        _echo_toon(asdict(info))
-        return
-    click.echo(
-        f"files={info.files} chunks={info.chunks} "
-        f"vectors={info.vectors} dimensions={info.dimensions}"
-    )
+    _echo_toon(_tools_payload())
 
 
 @explore.command("search")
 @click.argument("queries", nargs=-1, required=True)
 @click.option(
-    "--top-k",
-    "--top_k",
-    default=10,
+    "--max-results",
+    "--max_results",
+    default=24,
     show_default=True,
-    type=click.IntRange(min=1),
-)
-@click.option(
-    "--include-path",
-    "--include_path",
-    multiple=True,
-    help="SQL LIKE path pattern to include; repeat for multiple constraints.",
-)
-@click.option(
-    "--exclude-path",
-    "--exclude_path",
-    multiple=True,
-    help="SQL LIKE path pattern to exclude; repeat for multiple constraints.",
-)
-@click.option(
-    "--full",
-    is_flag=True,
-    help="Include the matching code with every result.",
+    type=click.IntRange(min=1, max=24, clamp=True),
 )
 @click.option(
     "--db-path",
@@ -267,128 +306,70 @@ def index_info(db_path: str, prose: bool, toon: bool) -> None:  # noqa: ARG001
     is_flag=True,
     hidden=True,
 )
-def semantic_search(
+def hybrid_search(
     queries: tuple[str, ...],
-    top_k: int,
-    include_path: tuple[str, ...],
-    exclude_path: tuple[str, ...],
-    full: bool,
+    max_results: int,
     db_path: str,
     prose: bool,
     toon: bool,  # noqa: ARG001
 ) -> None:
-    """Search semantically; pass multiple QUERY values to merge their rankings."""
-    options = SearchOptions(
-        top_k=top_k,
-        include_paths=include_path,
-        exclude_paths=exclude_path,
-    )
-    started_at: float = time.perf_counter()
-    with ReadOnlyExplorer(db_path) as explorer:
-        results = explorer.semantic_search(
-            list(queries),
-            embedder=make_embedder(),
-            options=options,
+    """Search one question's facets; pass 4-8 focused QUERY values.
+
+    Dense and BM25 candidates are fused with Reciprocal Rank Fusion, reserved
+    for facet coverage, selected for diversity, and expanded to complete
+    definitions plus their direct references. Only locations are returned:
+    read the ones worth reading with `explore chunks --range PATH START END`.
+    """
+    # Repeated facets would retrieve the same candidates twice and label one
+    # row with the same id twice, so they collapse before any work is done.
+    queries = tuple(
+        dict.fromkeys(
+            query.strip()[:MAX_QUERY_CHARS] for query in queries if query.strip()
         )
-    elapsed_ms: float = (time.perf_counter() - started_at) * 1000
-    if not prose:
-        _echo_toon([_result_payload(result, full=full) for result in results])
+    )[:MAX_QUERIES]
+    if not queries:
+        raise click.UsageError("Provide at least one non-empty QUERY")
+    embedder: Embedder = make_embedder()
+    reader = DuckDBSourceReader(db_path)
+    try:
+        lexical_store = DuckDBBm25Store(db_path, read_only=True)
+        try:
+            service = HybridSearchService(
+                (
+                    DuckDBDenseRetriever(reader, embedder),
+                    DuckDBLexicalRetriever(lexical_store, reader),
+                ),
+                reader,
+            )
+            try:
+                locations: list[SearchLocation] = service.search(
+                    queries,
+                    options=HybridSearchOptions(max_results=max_results),
+                )
+            except RuntimeError as exc:
+                raise click.ClickException(str(exc)) from exc
+        finally:
+            lexical_store.close()
+    finally:
+        reader.close()
+    if prose:
+        _echo_search_prose(locations, queries=queries)
         return
-    _echo_results(results, elapsed_ms=elapsed_ms, full=full)
-
-
-@explore.command("paths")
-@click.argument("pattern")
-@click.option("--limit", default=50, show_default=True, type=click.IntRange(min=1))
-@click.option(
-    "--db-path",
-    "--db_path",
-    default=DEFAULT_DB_PATH,
-    show_default=True,
-    type=click.Path(exists=True, dir_okay=False),
-)
-@click.option(
-    "--prose",
-    is_flag=True,
-    help="Print prose for a human instead of the default TOON rows.",
-)
-@click.option(
-    # Accepted and ignored: TOON is the default now, but these names are
-    # written into agent prompts that predate it, and failing those with
-    # "no such option" costs a whole turn to rediscover an unchanged command.
-    "--toon",
-    "--json-output",
-    "--json_output",
-    is_flag=True,
-    hidden=True,
-)
-def find_paths(
-    pattern: str,
-    limit: int,
-    db_path: str,
-    prose: bool,
-    toon: bool,  # noqa: ARG001
-) -> None:
-    """Find indexed paths containing PATTERN."""
-    with ReadOnlyExplorer(db_path) as explorer:
-        paths: list[str] = explorer.find_paths(pattern, limit=limit)
-    if not prose:
-        _echo_toon(paths)
-        return
-    click.echo("\n".join(paths) if paths else "No paths found.")
-
-
-@explore.command("text")
-@click.argument("text")
-@click.option("--path", help="Restrict results to one exact indexed path.")
-@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1))
-@click.option(
-    "--db-path",
-    "--db_path",
-    default=DEFAULT_DB_PATH,
-    show_default=True,
-    type=click.Path(exists=True, dir_okay=False),
-)
-@click.option(
-    "--prose",
-    is_flag=True,
-    help="Print prose for a human instead of the default TOON rows.",
-)
-@click.option(
-    # Accepted and ignored: TOON is the default now, but these names are
-    # written into agent prompts that predate it, and failing those with
-    # "no such option" costs a whole turn to rediscover an unchanged command.
-    "--toon",
-    "--json-output",
-    "--json_output",
-    is_flag=True,
-    hidden=True,
-)
-def text_search(
-    text: str,
-    path: str | None,
-    limit: int,
-    db_path: str,
-    prose: bool,
-    toon: bool,  # noqa: ARG001
-) -> None:
-    """Find the indexed source lines containing TEXT."""
-    with ReadOnlyExplorer(db_path) as explorer:
-        matches: list[TextMatch] = explorer.find_text_lines(
-            text,
-            path=path,
-            limit=limit,
-        )
-    if not prose:
-        _echo_toon([asdict(match) for match in matches])
-        return
-    _echo_text_matches(matches)
+    _echo_toon(_search_payload(locations, queries=queries))
 
 
 @explore.command("chunks")
-@click.argument("path")
+@click.argument("path", required=False)
 @click.option("--start-line", "--start_line", type=click.IntRange(min=1))
 @click.option("--end-line", "--end_line", type=click.IntRange(min=1))
+@click.option(
+    "--range",
+    "ranges",
+    nargs=3,
+    multiple=True,
+    type=(str, click.IntRange(min=1), click.IntRange(min=1)),
+    help="Read PATH START END; repeat to retrieve several ranges in one process.",
+)
 @click.option(
     "--full",
     is_flag=True,
@@ -417,9 +398,10 @@ def text_search(
     hidden=True,
 )
 def get_chunks(
-    path: str,
+    path: str | None,
     start_line: int | None,
     end_line: int | None,
+    ranges: tuple[tuple[str, int, int], ...],
     full: bool,
     db_path: str,
     prose: bool,
@@ -435,6 +417,29 @@ def get_chunks(
     holding a colon, and code is full of them, so a table of lines costs
     more than the numbered text it would replace and reads worse.
     """
+    if ranges:
+        if path is not None or start_line is not None or end_line is not None or full:
+            raise click.UsageError(
+                "--range cannot be combined with PATH, line options, or --full"
+            )
+        with ReadOnlyExplorer(db_path) as explorer:
+            for index, (range_path, range_start, range_end) in enumerate(ranges):
+                if range_start > range_end:
+                    raise click.BadParameter(
+                        "START cannot be greater than END",
+                        param_hint="--range",
+                    )
+                lines: list[SourceLine] = explorer.get_source_lines(
+                    range_path,
+                    start_line=range_start,
+                    end_line=range_end,
+                )
+                if index:
+                    click.echo()
+                _echo_source_lines(lines, path=range_path)
+        return
+    if path is None:
+        raise click.UsageError("Provide PATH or at least one --range PATH START END")
     ranged: bool = start_line is not None or end_line is not None
     try:
         with ReadOnlyExplorer(db_path) as explorer:
