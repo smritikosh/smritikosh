@@ -44,9 +44,9 @@ endif
 
 # Suites that run without loading the embedding model. Named once because both
 # test and cov need the list; add new directories here.
-FAST_TESTS := tests/engine/ tests/models/ \
+FAST_TESTS := tests/engine/ tests/models/ tests/ports/ \
 	tests/adapters/vector_store/ tests/adapters/file_source/ \
-	tests/adapters/storage/ \
+	tests/adapters/storage/ tests/adapters/retrieval/ \
 	tests/adapters/embedder/test_make_embedder.py \
 	tests/queries/ tests/indexing/ \
 	tests/test_cli.py \

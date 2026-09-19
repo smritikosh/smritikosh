@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 __all__ = ["VectorStore"]
 
@@ -23,6 +24,19 @@ class VectorStore(ABC):
 
     @abstractmethod
     def delete(self, chunk_id: str) -> None: ...
+
+    def delete_many(self, chunk_ids: Iterable[str]) -> None:
+        """Remove several vectors at once.
+
+        Defaults to one :meth:`delete` per id; stores that can do it in a
+        single round trip should override.
+        """
+        for chunk_id in chunk_ids:
+            self.delete(chunk_id)
+
+    @abstractmethod
+    def clear(self) -> None:
+        """Remove every stored vector."""
 
     @abstractmethod
     def exists(self, chunk_id: str) -> bool: ...

@@ -56,6 +56,7 @@ class VectorIndex:
                 score=score_map[m["id"]],
                 chunk_kind=m["chunk_kind"],
                 symbol=m.get("symbol"),
+                chunk_id=m["id"],
             )
             for m in chunk_metas
             if m["id"] in score_map

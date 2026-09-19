@@ -77,6 +77,7 @@ class SearchResult:
     score: float
     chunk_kind: str | None = None
     symbol: str | None = None
+    chunk_id: str | None = None
 
 
 class ChunkingStrategy(Protocol):

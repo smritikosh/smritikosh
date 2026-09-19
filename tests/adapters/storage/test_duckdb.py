@@ -336,3 +336,26 @@ def test_clear_caches_does_not_touch_nodes_table(adapter: DuckDBAdapter) -> None
 
     assert adapter.get_chunk_ids_for_file("a/b.py") == {"c1"}  # nodes untouched
     assert adapter.get_all_file_paths() == set()  # hashes cleared
+
+
+def test_clear_nodes_empties_the_whole_nodes_table(adapter: DuckDBAdapter) -> None:
+    """Chunk and file nodes both go — it is a DELETE over the table."""
+    adapter.upsert_chunk_nodes([_chunk("c1")])
+    adapter.upsert_file_node(_source("a/b.py"))
+
+    adapter.clear_nodes()
+
+    assert adapter.get_chunk_ids_for_file("a/b.py") == set()
+    assert adapter.con.execute("SELECT count(*) FROM nodes").fetchone()[0] == 0
+
+
+def test_clear_nodes_leaves_the_incremental_caches_alone(
+    adapter: DuckDBAdapter,
+) -> None:
+    """Clearing the caches is clear_caches' job; build_index calls both."""
+    adapter.upsert_chunk_nodes([_chunk("c1")])
+    adapter.set_file_hash("a/b.py", "h1")
+
+    adapter.clear_nodes()
+
+    assert adapter.get_all_file_paths() == {"a/b.py"}

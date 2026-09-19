@@ -148,29 +148,7 @@ def test_index_exits_zero_and_prints_done(runner, repo, db_path) -> None:
     assert "Done in" in result.output
 
 
-def test_index_full_clears_caches_before_build(runner, repo, db_path) -> None:
-    """--full must clear caches THEN call build_index, not the reverse."""
-    storage, vector_store = _mock_stores()
-    call_order: list[str] = []
-    storage.clear_caches.side_effect = lambda: call_order.append("clear")
-
-    with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
-        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch(
-            "smritikosh.indexing.pipeline.build_index",
-            side_effect=lambda *_, **__: call_order.append("build"),
-        ),
-    ):
-        result = runner.invoke(main, ["index", repo, "--db-path", db_path, "--full"])
-
-    assert result.exit_code == 0
-    assert call_order == ["clear", "build"]
-    assert "Cleared incremental caches" in result.output
-
-
-def test_index_full_calls_clear_caches_on_storage(runner, repo, db_path) -> None:
-    """--full delegates to storage.clear_caches() — CLI owns no cache logic."""
+def test_index_full_announces_the_rebuild(runner, repo, db_path) -> None:
     storage, vector_store = _mock_stores()
 
     with (
@@ -178,9 +156,43 @@ def test_index_full_calls_clear_caches_on_storage(runner, repo, db_path) -> None
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index"),
     ):
+        result = runner.invoke(main, ["index", repo, "--db-path", db_path, "--full"])
+
+    assert result.exit_code == 0
+    assert "Clearing indexes and incremental caches" in result.output
+
+
+def test_index_full_delegates_clearing_to_build_index(runner, repo, db_path) -> None:
+    """The CLI owns no clearing logic — build_index clears what it rebuilds.
+
+    Splitting the two let a direct build_index(full=True) clear the indexes
+    without the caches, which emptied the index instead of rebuilding it.
+    """
+    storage, vector_store = _mock_stores()
+
+    with (
+        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
+        patch("smritikosh.indexing.pipeline.build_index") as mock_build,
+    ):
         runner.invoke(main, ["index", repo, "--db-path", db_path, "--full"])
 
-    storage.clear_caches.assert_called_once()
+    storage.clear_caches.assert_not_called()
+    storage.clear_nodes.assert_not_called()
+    assert mock_build.call_args.kwargs["full"] is True
+
+
+def test_index_without_full_does_not_request_a_rebuild(runner, repo, db_path) -> None:
+    storage, vector_store = _mock_stores()
+
+    with (
+        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
+        patch("smritikosh.indexing.pipeline.build_index") as mock_build,
+    ):
+        runner.invoke(main, ["index", repo, "--db-path", db_path])
+
+    assert mock_build.call_args.kwargs["full"] is False
 
 
 def test_index_db_path_forwarded_to_open_stores(runner, repo, tmp_path: Path) -> None:

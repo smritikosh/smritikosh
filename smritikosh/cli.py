@@ -108,7 +108,7 @@ main.add_command(explore)
 @click.option(
     "--full",
     is_flag=True,
-    help="Force a full rebuild (clears memo_cache + file_hashes).",
+    help="Force a full rebuild (clears the indexes and incremental caches).",
 )
 def index(
     repo_path: str,
@@ -123,8 +123,7 @@ def index(
     storage, vector_store = _open_stores(db_path)
     try:
         if full:
-            storage.clear_caches()
-            click.echo("Cleared incremental caches — full rebuild forced.")
+            click.echo("Clearing indexes and incremental caches — full rebuild forced.")
 
         n_files = count_source_files(repo_path)
         click.echo(f"Indexing {repo_path!r} — {n_files} source file(s) …")
@@ -148,6 +147,7 @@ def index(
                 storage,
                 vector_store,
                 on_file_indexed=_on_file,
+                full=full,
             )
 
         elapsed = time.perf_counter() - t0

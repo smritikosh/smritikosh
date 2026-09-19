@@ -1,0 +1,1 @@
+"""Retrieval adapter implementations."""

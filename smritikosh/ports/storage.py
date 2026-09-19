@@ -55,3 +55,18 @@ class StorageAdapter(ABC):
     @abstractmethod
     def delete_file(self, path: str) -> None:
         """Atomically remove all nodes and the file_hash for *path*."""
+
+    # ------------------------------------------------------------------ reset
+
+    @abstractmethod
+    def clear_nodes(self) -> None:
+        """Remove all indexed source nodes."""
+
+    @abstractmethod
+    def clear_caches(self) -> None:
+        """Empty the memo cache and the file hashes — forces a full re-index.
+
+        Must run alongside :meth:`clear_nodes` on a full rebuild: dropping the
+        nodes while the caches still claim every file is up to date leaves the
+        rebuild with nothing to write back.
+        """
