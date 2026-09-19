@@ -120,7 +120,10 @@ class HybridSearchOptions:
 
     candidates_per_channel: int = 30
     max_candidates: int = 400
-    max_seeds: int = 16
+    #: How many candidates coverage-and-diversity selection keeps.  It matches
+    #: max_results because selection now produces the reported list outright;
+    #: the two differed while a dependency round appended to what it chose.
+    max_seeds: int = 24
     max_results: int = 24
     rrf_k: int = 60
     mmr_lambda: float = 0.7
@@ -129,7 +132,6 @@ class HybridSearchOptions:
     documentation_penalty: float = 0.75
     migration_penalty: float = 0.85
     unrelated_test_penalty: float = 0.9
-    max_dependencies_per_seed: int = 4
     exclude_paths: tuple[str, ...] = (
         ".claude/%",
         ".cursor/%",

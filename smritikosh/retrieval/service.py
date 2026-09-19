@@ -9,7 +9,7 @@ from smritikosh.models.retrieval import (
 )
 from smritikosh.ports.retrieval import CandidateRetriever
 from smritikosh.ports.source_reader import SourceReader
-from smritikosh.retrieval.expansion import CandidateExpander
+from smritikosh.retrieval.definitions import complete_definitions
 from smritikosh.retrieval.hybrid import HybridRetriever
 from smritikosh.retrieval.priors import apply_metadata_priors, infer_topic
 from smritikosh.retrieval.selection import select_seeds
@@ -54,7 +54,6 @@ class HybridSearchService:
         self._retrievers = retrievers
         self._reader = reader
         self._hybrid = HybridRetriever(retrievers)
-        self._expander = CandidateExpander(reader)
 
     def search(
         self,
@@ -62,7 +61,7 @@ class HybridSearchService:
         *,
         options: HybridSearchOptions | None = None,
     ) -> list[SearchLocation]:
-        """Retrieve, fuse, and expand locations for caller-supplied facets."""
+        """Retrieve, fuse, and select locations for caller-supplied facets."""
         options = options or HybridSearchOptions()
         normalized: tuple[str, ...] = tuple(
             facet.strip() for facet in facets if facet.strip()
@@ -91,8 +90,9 @@ class HybridSearchService:
             normalized,
             options=options,
         )
-        expanded: list[RankedCandidate] = self._expander.expand(
+        located: list[RankedCandidate] = complete_definitions(
             seeds,
+            reader=self._reader,
             options=options,
         )
         return [
@@ -103,5 +103,5 @@ class HybridSearchService:
                 symbol=candidate.result.symbol,
                 facets=_reported_facets(candidate, normalized),
             )
-            for candidate in expanded
+            for candidate in located
         ]
