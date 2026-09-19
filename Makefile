@@ -134,14 +134,15 @@ cov:
 check-wheel:
 	@rm -rf dist/wheel-check
 	@$(PY) -m build --wheel --outdir dist/wheel-check >/dev/null
-	@found=$$(unzip -l dist/wheel-check/*.whl | grep -c 'queries/.*/tags\.scm'); \
-	if [ "$$found" -ne 7 ]; then \
-	    echo "ERROR: expected 7 tags.scm files in the wheel, found $$found."; \
+	@expected=$$(find smritikosh/queries -name 'tags.scm' | wc -l | tr -d '[:space:]'); \
+	found=$$(unzip -l dist/wheel-check/*.whl | grep -c 'queries/.*/tags\.scm'); \
+	if [ "$$found" -ne "$$expected" ]; then \
+	    echo "ERROR: wheel carries $$found tags.scm files; $$expected are in smritikosh/queries/."; \
 	    echo "Check [tool.setuptools.package-data] in pyproject.toml."; \
 	    rm -rf dist/wheel-check; exit 1; \
 	fi; \
 	rm -rf dist/wheel-check; \
-	echo "Wheel carries all 7 tags.scm files."
+	echo "Wheel carries all $$expected tags.scm files."
 
 # ── Lint / Format ─────────────────────────────────────────────────────────────
 

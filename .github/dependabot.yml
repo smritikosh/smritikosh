@@ -1,0 +1,33 @@
+version: 2
+
+updates:
+  # Workflow actions are pinned to commit SHAs, which never move on their own.
+  # Dependabot is what turns that pin from "frozen" into "updated deliberately".
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore |"
+    labels:
+      - dependencies
+
+  # uv.lock is not committed, so there is no resolved graph for Dependabot to
+  # bump. This watches the ranges declared in pyproject.toml instead, which is
+  # coarser but still catches a dependency that has gone stale or unsafe.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore |"
+    labels:
+      - dependencies
+    ignore:
+      # The <1.0 pin in pyproject.toml is deliberate: 1.x fetches grammar
+      # binaries at first use instead of bundling them in the wheel, which
+      # breaks the offline, deterministic install. No test would catch the
+      # regression, since CI has a network. Revisit only if 1.x starts
+      # bundling again.
+      - dependency-name: tree-sitter-language-pack
+        update-types: ["version-update:semver-major"]

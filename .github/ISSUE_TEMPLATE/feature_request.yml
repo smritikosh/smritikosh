@@ -1,0 +1,38 @@
+name: Feature request
+description: A capability Smritikosh does not have yet.
+labels: ["enhancement", "status:needs-triage"]
+
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do
+      description: >
+        The situation, not the solution. What question is your agent asking, and
+        where does Smritikosh leave you short?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would want it to do
+      description: If you have a shape in mind, sketch the command or the output.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you tried instead
+      description: Existing flags, a different query, another tool. Helps us see the gap.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: This is a new capability, not a request for an adapter behind an existing port.
+          required: false
+        - label: I searched existing issues and this is not a duplicate.
+          required: true

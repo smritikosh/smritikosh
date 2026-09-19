@@ -1,0 +1,5 @@
+# Review is requested automatically from these owners on every pull request.
+# The branch ruleset requires one approval; it does not require it to come from
+# an owner, so this assigns reviewers rather than adding a second gate.
+
+* @learncoder4848 @devsarvesh92

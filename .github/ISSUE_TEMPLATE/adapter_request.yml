@@ -1,0 +1,52 @@
+name: Adapter request
+description: A source, store, embedder, or language that should sit behind an existing port.
+labels: ["enhancement", "area:adapters", "status:needs-triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: >
+        The pipeline talks to contracts in `smritikosh/ports`, and
+        `smritikosh/adapters` is what exists today. If the thing you want fits one
+        of those contracts, it is an adapter and not a redesign. Tell us which one
+        you need first.
+
+  - type: dropdown
+    id: port
+    attributes:
+      label: Which plug point
+      options:
+        - Source (where content is read from)
+        - Structure (a language or document format to parse)
+        - Store (where chunks and vectors live)
+        - Embedder (what turns text into vectors)
+        - Retrieval (an additional ranking channel)
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: What system or format
+      placeholder: "Confluence, Qdrant, Voyage, Go, PDF"
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: What you would ask it
+      description: >
+        A question your agent should be able to answer once this is indexed, and the
+        citation you would expect back. Concrete beats general.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Would you build it
+      options:
+        - label: I would be willing to write this adapter against the existing port.
+          required: false

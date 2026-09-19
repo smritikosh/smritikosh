@@ -110,9 +110,10 @@ def split_oversized(
     return windows
 
 
-def chunk_id(text: str) -> str:
-    """sha256(text)[:16] — stable, content-addressed chunk id."""
-    return content_hash(text)[:16]
+def chunk_id(path: str, text: str, start_line: int, end_line: int) -> str:
+    """Return a stable location-aware storage id."""
+    identity: str = f"{path}\0{start_line}:{end_line}\0{text}"
+    return hashlib.sha256(identity.encode()).hexdigest()[:16]
 
 
 def content_hash(text: str) -> str:
@@ -139,10 +140,10 @@ def build_chunk(
     end_line: int,
     symbol: str | None = None,
 ) -> Chunk:
-    """Build a content-addressed Chunk. id is sha256(text)[:16]."""
+    """Build a path-addressed chunk carrying a separate content hash."""
     digest = content_hash(text)
     return Chunk(
-        id=digest[:16],
+        id=chunk_id(path, text, start_line, end_line),
         path=path,
         start_line=start_line,
         end_line=end_line,
@@ -167,8 +168,8 @@ def build_chunks(
 
     ``max_chars=None`` disables splitting and yields exactly one chunk, which
     is what the tests and any caller without an embedder in scope want.
-    Because ids stay content-addressed, a split piece is memoised and skipped
-    independently — editing one constant re-embeds one window, not the file.
+    Because ids include path and text, a split piece is memoised independently
+    without colliding with identical source in another file.
 
     Every window of a split definition keeps that definition's *symbol*: the
     windows are pieces of one function, and naming them all lets a reader see

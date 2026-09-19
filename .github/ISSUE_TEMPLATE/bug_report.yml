@@ -1,0 +1,61 @@
+name: Bug report
+description: Something indexed, searched, or installed in a way it should not have.
+labels: ["bug", "status:needs-triage"]
+
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: >
+        The commands you ran, in order. If the corpus matters, say what it looked
+        like: how many files, which languages, code or Markdown.
+      render: shell
+      placeholder: |
+        smritikosh index ./my-repo
+        smritikosh explore search "authorization decision flow"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Smritikosh version
+      description: Output of `smritikosh --version`.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Python, OS, and architecture
+      description: >
+        Architecture matters for the ONNX runtime the embedder loads, so include it.
+      placeholder: "Python 3.12, macOS 15, arm64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Output or traceback
+      description: Paste the failure verbatim. No need for backticks.
+      render: shell
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability (those go through a private advisory).
+          required: true

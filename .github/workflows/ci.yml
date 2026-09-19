@@ -10,12 +10,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to commit SHAs, not tags: a tag is mutable and can be moved
+# onto new code by whoever owns the action. The trailing comment is the version
+# the SHA corresponds to, and Dependabot bumps both together.
+
 jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       - run: uv sync --all-groups
@@ -31,8 +35,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
@@ -44,8 +48,8 @@ jobs:
   coverage:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       - run: uv sync --all-groups
@@ -54,8 +58,8 @@ jobs:
   package:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: true
       - run: uv build
@@ -63,11 +67,16 @@ jobs:
       # The .scm query files reach the wheel only through a package-data glob
       # in pyproject.toml; nothing in the test suite notices if it stops
       # matching. Catching that here beats catching it during a release.
+      #
+      # The expected count comes from the tree rather than a literal, so adding
+      # a language does not fail this check for an unrelated-looking reason.
       - name: Check wheel carries the tag queries
         run: |
+          expected=$(find smritikosh/queries -name 'tags.scm' | wc -l | tr -d '[:space:]')
           found=$(unzip -l dist/*.whl | grep -c 'queries/.*/tags\.scm')
-          if [ "$found" -ne 7 ]; then
-            echo "Expected 7 tags.scm files in the wheel, found $found." >&2
+          if [ "$found" -ne "$expected" ]; then
+            echo "Wheel carries $found tags.scm files; $expected are in smritikosh/queries/." >&2
+            echo "Check [tool.setuptools.package-data] in pyproject.toml." >&2
             exit 1
           fi
 

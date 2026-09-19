@@ -9,9 +9,12 @@ repos:
 
   - repo: local
     hooks:
+      # Delegates to the Makefile so the hook, `make check`, and CI run the same
+      # suites against the same gate. A hook with its own threshold is worse than
+      # no hook: it passes locally and fails in CI.
       - id: pytest
         name: pytest (smritikosh)
         language: system
-        entry: .venv/bin/python -m pytest --cov=smritikosh --cov-fail-under=75 -q
+        entry: make cov
         pass_filenames: false
         always_run: true

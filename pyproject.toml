@@ -53,9 +53,9 @@ dependencies = [
 smritikosh = "smritikosh.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/learncoder4848/smritikosh"
-Repository = "https://github.com/learncoder4848/smritikosh"
-Issues = "https://github.com/learncoder4848/smritikosh/issues"
+Homepage = "https://github.com/smritikosh/smritikosh"
+Repository = "https://github.com/smritikosh/smritikosh"
+Issues = "https://github.com/smritikosh/smritikosh/issues"
 
 # 77 is the first release that accepts the PEP 639 `license` expression and
 # `license-files` above; earlier versions want the old license classifier.

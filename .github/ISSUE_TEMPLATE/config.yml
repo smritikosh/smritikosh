@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Question or idea
+    url: https://github.com/smritikosh/smritikosh/discussions
+    about: Anything that is not a defect or a concrete request goes to Discussions.
+
+  - name: Security vulnerability
+    url: https://github.com/smritikosh/smritikosh/security/advisories/new
+    about: Report privately. Never open a public issue for a vulnerability.

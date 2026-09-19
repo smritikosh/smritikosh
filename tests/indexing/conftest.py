@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 from dataclasses import dataclass, field
 
+from smritikosh.indexing.strategies._helpers import chunk_id
 from smritikosh.models import Capture, Chunk, ParsedFile
 
 # ── FakeStrategy ───────────────────────────────────────────────────────────
@@ -77,6 +77,16 @@ def cap(name: str, node: FakeNode, path: str = "test.py", key: str = "") -> Capt
     return Capture(capture_name=name, node=node, name=key, path=path)
 
 
-def cid(text: str) -> str:
-    """Return the expected chunk id for *text*."""
-    return hashlib.sha256(text.encode()).hexdigest()[:16]
+def cid(
+    text: str,
+    path: str = "test.py",
+    start_line: int = 1,
+    end_line: int = 1,
+) -> str:
+    """Return the expected chunk id for *text* at the given location.
+
+    Defers to the production formula rather than restating it, so the two
+    cannot drift apart.  The formula itself is pinned literally in
+    ``test_should_build_stable_ids_from_path_lines_and_text``.
+    """
+    return chunk_id(path, text, start_line, end_line)

@@ -237,7 +237,7 @@ class TestAstChunkingStrategy:
 
         assert self.strategy.chunk(p, caps)[0].id == self.strategy.chunk(p, caps)[0].id
 
-    def test_chunk_id_is_sha256_prefix_of_text(self) -> None:
+    def test_chunk_id_is_stable_for_same_location_and_text(self) -> None:
         content = "def foo(): pass\n"
         p = parsed(content)
         node = node_for(content, "def foo(): pass")
