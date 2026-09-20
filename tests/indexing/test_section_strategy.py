@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from smritikosh.indexing.strategies.section import SectionChunkingStrategy
+from smritikosh.indexing.strategies._helpers import build_chunk
+from smritikosh.indexing.strategies.section import (
+    SectionChunkingStrategy,
+    _merge_markdown_fragments,
+)
 from tests.indexing.conftest import cap, node_for, parsed
 
 
@@ -295,6 +299,48 @@ class TestJsonSectionChunking:
         for chunk in chunks:
             breadcrumb = chunk.text.split("\n\n", 1)[0]
             assert len(breadcrumb) <= 512 // 3
+
+    def test_should_not_merge_a_small_section_into_the_next_one(self) -> None:
+        """A merged pair reports the later heading, losing the earlier one.
+
+        Fragments are merged across the whole file, so a section below the
+        floor would absorb the section after it and be reported under that
+        section's symbol -- attributing its prose to the wrong heading in the
+        outline and in every citation built from it.
+        """
+        content = (
+            "# Handbook\n\n"
+            "## Ledger\n\nShort.\n\n"
+            "## Scope\n\nScope covers what the tool reads and writes.\n"
+        )
+        p = parsed(content, "doc.md", language="markdown")
+        captures = [
+            cap("definition.section", node_for(content, "# Handbook"), key="Handbook"),
+            cap("definition.section", node_for(content, "## Ledger"), key="Ledger"),
+            cap("definition.section", node_for(content, "## Scope"), key="Scope"),
+        ]
+
+        chunks = SectionChunkingStrategy(max_chars=2_000).chunk(p, captures)
+
+        assert [chunk.symbol for chunk in chunks] == [
+            "Handbook > Ledger",
+            "Handbook > Scope",
+        ]
+        assert "Short." in chunks[0].text
+        assert "Scope covers" not in chunks[0].text
+
+    def test_should_still_merge_two_fragments_of_one_section(self) -> None:
+        """Keeping headings apart must not switch fragment merging off."""
+        fragments = [
+            build_chunk("doc.md", "# Only\n\nfirst", "section", 3, 3, "Only"),
+            build_chunk("doc.md", "# Only\n\nsecond", "section", 5, 5, "Only"),
+        ]
+
+        merged = _merge_markdown_fragments(fragments, 2_000)
+
+        assert len(merged) == 1
+        assert merged[0].symbol == "Only"
+        assert (merged[0].start_line, merged[0].end_line) == (3, 5)
 
     def test_should_measure_each_block_once_while_packing(self) -> None:
         """The pending run is measured once, when the block that grew it arrives.

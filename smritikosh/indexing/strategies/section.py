@@ -305,7 +305,16 @@ def _merge_markdown_fragments(
     token_counter: Callable[[str], int] | None = None,
     max_tokens: int | None = None,
 ) -> list[Chunk]:
-    """Merge adjacent tiny Markdown chunks when the embedding budget permits."""
+    """Merge adjacent tiny Markdown chunks from one section.
+
+    Only chunks sharing a heading merge.  Chunks arrive here for the whole
+    file, so an undersized section would otherwise absorb the one after it and
+    report that one's heading as its symbol -- the outline and every cited
+    ``PATH:START-END`` would then attribute the first section's prose to the
+    second.  A section too small to reach the floor on its own stays small;
+    it still carries its own breadcrumb, which is the context the merge was
+    trying to buy.
+    """
     if max_chars is None and (token_counter is None or max_tokens is None):
         return chunks
 
@@ -317,7 +326,11 @@ def _merge_markdown_fragments(
 
     merged: list[Chunk] = []
     for chunk in chunks:
-        if merged and len(merged[-1].text) < _MIN_CHUNK_CHARS:
+        if (
+            merged
+            and len(merged[-1].text) < _MIN_CHUNK_CHARS
+            and merged[-1].symbol == chunk.symbol
+        ):
             previous = merged[-1]
             text = f"{previous.text.rstrip()}\n\n{chunk.text.lstrip()}"
             if fits(text):
@@ -331,7 +344,11 @@ def _merge_markdown_fragments(
                 )
                 continue
         merged.append(chunk)
-    if len(merged) > 1 and len(merged[-1].text) < _MIN_CHUNK_CHARS:
+    if (
+        len(merged) > 1
+        and len(merged[-1].text) < _MIN_CHUNK_CHARS
+        and merged[-2].symbol == merged[-1].symbol
+    ):
         previous, tail = merged[-2:]
         text = f"{previous.text.rstrip()}\n\n{tail.text.lstrip()}"
         if fits(text):
