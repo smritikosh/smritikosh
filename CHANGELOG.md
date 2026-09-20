@@ -41,6 +41,13 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   judges worth reading through `explore chunks --range`. `--top-k`, `--include-path`,
   `--exclude-path`, and `--full` are gone from `search`; `--max-results` bounds the page
   instead, at up to 24.
+- Markdown is split at heading boundaries and sized against the embedding model's own
+  tokenizer instead of a character estimate. A nested section used to be stored twice,
+  once inside its parent heading's chunk and again as its own, and a chunk that looked
+  small enough in characters could still overrun the model's window, which encodes the
+  prefix and drops the rest. Each chunk now carries its heading breadcrumb, so a passage
+  read from the middle of a document still says which section it came from. Boundaries
+  change for every Markdown file, so run `smritikosh index --full` once to rebuild them.
 
 ### Fixed
 
@@ -56,5 +63,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   removed, but the rows keyed by the chunk ids that had just been dropped were left
   behind. An index built before this fix may still be carrying them; one
   `smritikosh index --full` clears them out.
+- Separate chunks of one Markdown section no longer collapse into a single result. Every
+  chunk of a section carries that section's heading as its symbol, and deduplication keyed
+  on the symbol, so a long section returned only its first chunk however many matched.
 
 [Unreleased]: https://github.com/smritikosh/smritikosh/compare/v0.1.0...HEAD
