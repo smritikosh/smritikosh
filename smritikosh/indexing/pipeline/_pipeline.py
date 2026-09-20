@@ -133,7 +133,16 @@ async def _run_pipeline(
     # Chunks are capped at what this model actually encodes — an over-long
     # chunk would be stored whole but embedded from its prefix only.
     max_chars = budget_chars(embedder.max_tokens)
-    files = list(iter_source_files(file_source, _build_router(max_chars)))
+    files = list(
+        iter_source_files(
+            file_source,
+            _build_router(
+                max_chars,
+                embedder.max_tokens,
+                embedder.count_tokens,
+            ),
+        )
+    )
 
     stored_paths = set(storage.get_all_file_paths())
     current_paths = {f.path for f in files}

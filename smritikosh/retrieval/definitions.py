@@ -96,9 +96,18 @@ def _append_unique(
     definition are two distinct chunks with distinct spans, so nothing
     upstream treats them as duplicates, but once both are widened they name
     the same lines.
+
+    Only a widened chunk can have become a duplicate, so only those collapse
+    by symbol.  A Markdown section repeats its heading across every chunk it
+    was split into and is never widened, so collapsing those would drop
+    evidence the reader never saw.
     """
     result: SearchResult = candidate.result
-    identity: str = result.symbol or f"@{result.start_line}:{result.end_line}"
+    identity: str = (
+        result.symbol
+        if result.symbol is not None and result.chunk_kind in _COMPLETABLE_KINDS
+        else f"@{result.start_line}:{result.end_line}"
+    )
     key: tuple[str, str, str | None] = (
         result.path,
         identity,

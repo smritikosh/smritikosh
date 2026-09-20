@@ -78,6 +78,10 @@ class FastEmbedEmbedder(Embedder):
             self._max_tokens = int(truncation.get("max_length") or super().max_tokens)
         return self._max_tokens
 
+    def count_tokens(self, text: str) -> int:
+        """Count tokens with the exact tokenizer used for document embedding."""
+        return len(self._load().model.tokenizer.encode(text).ids)
+
     def encode_documents(self, texts: list[str]) -> list[list[float]]:
         return self._encode(texts)
 
