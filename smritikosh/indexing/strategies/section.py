@@ -259,10 +259,14 @@ def _pack_markdown_blocks(
     soft_target = max(int(hard_limit * _MARKDOWN_SOFT_TARGET), 1)
     chunks: list[Chunk] = []
     pending: list[_MarkdownBlock] = []
+    # Carried across iterations rather than re-derived: measuring the pending
+    # run again on every block re-tokenizes the whole buffer each time, and
+    # the count is already known from the step that admitted the last block.
+    empty_tokens: int = token_counter(prefix)
+    pending_text: str = ""
+    pending_tokens: int = empty_tokens
     for block in _markdown_blocks(text):
-        candidate = prefix + "".join(item.text for item in [*pending, block])
-        pending_tokens = token_counter(prefix + "".join(b.text for b in pending))
-        candidate_tokens = token_counter(candidate)
+        candidate_tokens: int = token_counter(prefix + pending_text + block.text)
         crosses_target_farther = candidate_tokens >= soft_target and abs(
             pending_tokens - soft_target
         ) <= abs(candidate_tokens - soft_target)
@@ -275,7 +279,12 @@ def _pack_markdown_blocks(
                 _build_markdown_pack(parsed, pending, start_line, prefix, symbol)
             )
             pending = []
-        if token_counter(prefix + block.text) > hard_limit:
+            pending_text = ""
+            pending_tokens = empty_tokens
+            # The run this block was measured against is gone, so what matters
+            # now is whether the block fits a chunk of its own.
+            candidate_tokens = token_counter(prefix + block.text)
+        if candidate_tokens > hard_limit:
             pieces = _token_split_block(block, prefix, token_counter, hard_limit)
             chunks.extend(
                 _build_markdown_pack(parsed, [piece], start_line, prefix, symbol)
@@ -283,6 +292,8 @@ def _pack_markdown_blocks(
             )
         else:
             pending.append(block)
+            pending_text += block.text
+            pending_tokens = candidate_tokens
     if pending:
         chunks.append(_build_markdown_pack(parsed, pending, start_line, prefix, symbol))
     return chunks

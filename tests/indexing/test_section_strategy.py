@@ -296,6 +296,38 @@ class TestJsonSectionChunking:
             breadcrumb = chunk.text.split("\n\n", 1)[0]
             assert len(breadcrumb) <= 512 // 3
 
+    def test_should_measure_each_block_once_while_packing(self) -> None:
+        """The pending run is measured once, when the block that grew it arrives.
+
+        Re-deriving it on every block re-tokenizes the whole buffer each time,
+        and a real tokenizer pass is the most expensive thing indexing does.
+        """
+        blocks = [
+            f"Paragraph {index} with a little filler prose." for index in range(20)
+        ]
+        content = "# Section\n\n" + "\n\n".join(blocks) + "\n"
+        p = parsed(content, "doc.md", language="markdown")
+        captures = [
+            cap("definition.section", node_for(content, "# Section"), key="Section")
+        ]
+        measured: list[str] = []
+
+        def counting(text: str) -> int:
+            measured.append(text)
+            return len(text.split())
+
+        SectionChunkingStrategy(
+            max_chars=2_000,
+            max_tokens=5_000,
+            token_counter=counting,
+        ).chunk(p, captures)
+
+        # Two fixed calls measure the breadcrumb — once to cap it, once to
+        # prime the running total — and then one call admits each block.
+        # Nothing here flushes, so any further call is the pending run being
+        # measured a second time, which is what re-tokenizes the whole buffer.
+        assert len(measured) <= len(blocks) + 2
+
     def test_should_split_one_oversized_block_by_exact_token_count(self) -> None:
         paragraph = " ".join(f"token{i}" for i in range(100))
         content = f"# Long\n\n{paragraph}"
