@@ -40,6 +40,10 @@ _MARKDOWN_BREAK_FLOOR: Final[float] = 0.55
 _MARKDOWN_BUDGET_FACTOR: Final[float] = 0.65
 _MARKDOWN_TOKEN_RESERVE: Final[float] = 0.0625
 _MARKDOWN_SOFT_TARGET: Final[float] = 0.8
+#: Share of a chunk's budget the heading breadcrumb may spend. The breadcrumb
+#: repeats every ancestor, so a deep hierarchy of long headings would otherwise
+#: crowd out the content it is supposed to introduce.
+_MARKDOWN_PREFIX_SHARE: Final[int] = 3
 
 
 @dataclass(frozen=True)
@@ -63,25 +67,52 @@ def _heading_level(capture: Capture, raw: bytes) -> int:
     return 2
 
 
+def _render_breadcrumb(hierarchy: list[tuple[int, str]]) -> str:
+    """Render a heading stack as Markdown, one heading per line."""
+    return "\n".join(f"{'#' * level} {name}" for level, name in hierarchy)
+
+
 def _heading_prefix(
     hierarchy: list[tuple[int, str]],
-    max_chars: int | None,
+    budget: int | None,
+    measure: Callable[[str], int] = len,
 ) -> str:
-    """Build a compact Markdown breadcrumb, retaining nearest ancestors first."""
-    selected = hierarchy[:]
-    limit = None if max_chars is None else max(min(max_chars // 3, max_chars - 1), 0)
+    """Build a compact Markdown breadcrumb, retaining nearest ancestors first.
+
+    *budget* is the chunk budget and *measure* counts in whatever unit that
+    budget is expressed in, so a caller sizing chunks by model tokens caps the
+    breadcrumb in tokens too.  Ancestors are dropped outermost-first, and a
+    nearest heading that still overruns on its own is trimmed: a chunk made
+    almost entirely of repeated ancestor headings embeds as its hierarchy
+    rather than as its content.
+    """
+    if not hierarchy:
+        return ""
+    if budget is None:
+        return _render_breadcrumb(hierarchy) + "\n\n"
+    limit = max(min(budget // _MARKDOWN_PREFIX_SHARE, budget - 1), 0)
     if limit == 0:
         return ""
-    while len(selected) > 1:
-        prefix = "\n".join(f"{'#' * level} {name}" for level, name in selected)
-        if limit is None or len(prefix) + 2 <= limit:
-            break
+    selected = hierarchy[:]
+    while len(selected) > 1 and measure(_render_breadcrumb(selected) + "\n\n") > limit:
         selected.pop(0)
-    prefix = "\n".join(f"{'#' * level} {name}" for level, name in selected) + "\n\n"
-    if limit is not None and len(prefix) > limit:
-        suffix = "\n\n" if limit >= 2 else ""
-        prefix = prefix[: limit - len(suffix)].rstrip() + suffix
-    return prefix
+    prefix = _render_breadcrumb(selected) + "\n\n"
+    if measure(prefix) <= limit:
+        return prefix
+    # One heading over the share on its own: keep as much of its text as fits
+    # rather than emit a breadcrumb that leaves no room for the body.
+    level, name = selected[-1]
+    low, high, best = 0, len(name), 0
+    while low <= high:
+        middle = (low + high) // 2
+        if measure(_render_breadcrumb([(level, name[:middle])]) + "\n\n") <= limit:
+            best = middle
+            low = middle + 1
+        else:
+            high = middle - 1
+    if best == 0:
+        return ""
+    return _render_breadcrumb([(level, name[:best].rstrip())]) + "\n\n"
 
 
 def _preferred_markdown_cut(window: str, minimum: int) -> int:
@@ -358,10 +389,18 @@ def _chunk_markdown(
     token_counter: Callable[[str], int] | None,
 ) -> list[Chunk]:
     """Partition Markdown by headings without nested or code-block duplication."""
+    # The breadcrumb is budgeted in whatever unit sizes the chunk.  Token mode
+    # clears max_chars, so it must hand the breadcrumb a token budget instead
+    # of inheriting the cleared one and ending up with no cap at all.
+    prefix_budget: int | None = max_chars
+    prefix_measure: Callable[[str], int] = len
     if token_counter is not None and max_tokens is not None:
         max_chars = None
+        prefix_budget = max_tokens
+        prefix_measure = token_counter
     elif max_chars is not None:
         max_chars = max(int(max_chars * _MARKDOWN_BUDGET_FACTOR), 1)
+        prefix_budget = max_chars
     raw = parsed.content.encode()
     headings = sorted(
         (c for c in captures if c.capture_name == _MARKDOWN_SECTION_CAPTURE),
@@ -402,7 +441,7 @@ def _chunk_markdown(
         level = _heading_level(capture, raw)
         hierarchy = [(depth, name) for depth, name in hierarchy if depth < level]
         hierarchy.append((level, capture.name.strip()))
-        prefix = _heading_prefix(hierarchy, max_chars)
+        prefix = _heading_prefix(hierarchy, prefix_budget, prefix_measure)
         next_start = (
             headings[index + 1].node.start_byte
             if index + 1 < len(headings)

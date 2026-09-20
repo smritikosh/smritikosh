@@ -261,6 +261,41 @@ class TestJsonSectionChunking:
         assert blocks[2] in chunks[0].text
         assert blocks[3] in chunks[1].text
 
+    def test_should_cap_the_breadcrumb_against_the_token_budget(self) -> None:
+        """A deep hierarchy of long headings must leave room for the body.
+
+        Token mode has no character budget for the breadcrumb to inherit, so
+        without a cap of its own the breadcrumb grows with nesting depth until
+        every chunk is heading text, splits one character at a time, and still
+        lands over the window it was supposed to respect.
+        """
+        heading = "Operational " * 60
+        content = "".join(
+            f"{'#' * level} {heading} L{level}\n\nBody prose at level {level}.\n\n"
+            for level in range(1, 7)
+        )
+        p = parsed(content, "deep.md", language="markdown")
+        captures = [
+            cap(
+                "definition.section",
+                node_for(content, f"{'#' * level} {heading} L{level}"),
+                key=f"{heading} L{level}",
+            )
+            for level in range(1, 7)
+        ]
+
+        chunks = SectionChunkingStrategy(
+            max_chars=2_000,
+            max_tokens=512,
+            token_counter=len,
+        ).chunk(p, captures)
+
+        assert len(chunks) == 6, "one chunk per section, not one per character"
+        assert all(len(chunk.text) <= 512 for chunk in chunks)
+        for chunk in chunks:
+            breadcrumb = chunk.text.split("\n\n", 1)[0]
+            assert len(breadcrumb) <= 512 // 3
+
     def test_should_split_one_oversized_block_by_exact_token_count(self) -> None:
         paragraph = " ".join(f"token{i}" for i in range(100))
         content = f"# Long\n\n{paragraph}"
