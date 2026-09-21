@@ -81,7 +81,7 @@ dev = [
     # Pinned exactly, and kept in step with .pre-commit-config.yaml: a
     # formatter that drifts between the hook and CI reformats the tree on
     # whichever one runs second.
-    "ruff==0.16.7",
+    "ruff==0.16.8",
     "pre-commit>=4.6.2",
     "duckdb>=1.0",
 ]
