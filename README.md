@@ -135,6 +135,50 @@ one you need first, or build it against the same contract.
 Built something on top of Smritikosh?
 [Tell us](https://github.com/smritikosh/smritikosh/issues). We want to see it.
 
+## Prior art: _the papers behind these choices_
+
+Three papers shaped decisions you can point at in the code. Citing one credits an idea we
+used; it does not mean its authors reviewed or endorsed Smritikosh, and where our
+implementation diverges from theirs, that is said out loud.
+
+**Chunk on structure, not on line counts.** Zhang, Zhao, Wang, Yang, Wei and Wu,
+[_cAST: Enhancing Code Retrieval-Augmented Generation with Structural Chunking via Abstract
+Syntax Tree_](https://arxiv.org/abs/2506.15655) (arXiv:2506.15655, 2025), argues that
+line-based chunking breaks functions apart and merges unrelated code, and that recursively
+splitting oversized AST nodes while merging siblings under a size limit yields self-contained
+units. That is the shape of
+[`strategies/ast.py`](https://github.com/smritikosh/smritikosh/blob/main/smritikosh/indexing/strategies/ast.py) —
+siblings grouped, a class carried together with its initializer — and of `split_oversized` in
+[`strategies/_helpers.py`](https://github.com/smritikosh/smritikosh/blob/main/smritikosh/indexing/strategies/_helpers.py).
+We diverge on the oversized case: cAST recurses into the node, we cut it into overlapping line
+windows.
+
+**Fuse independent channels by rank.** Choudhary, Kandoi and Patel,
+[_Hybrid GraphRAG for Cross-Lingual Legal Citation Retrieval: A Multi-Signal Fusion Approach
+for Swiss Legal Information Systems_](https://ijecs.in/index.php/ijecs/article/view/5461)
+(IJECS, 2026), runs lexical, dense, and graph retrieval as separate families and combines them
+with weighted Reciprocal Rank Fusion, reporting `k = 60` as where top-rank emphasis balances
+against rank dilution.
+[`retrieval/hybrid.py`](https://github.com/smritikosh/smritikosh/blob/main/smritikosh/retrieval/hybrid.py)
+keeps that channel separation,
+[`retrieval/fusion.py`](https://github.com/smritikosh/smritikosh/blob/main/smritikosh/retrieval/fusion.py)
+defaults to that `k`, and the call-graph channel listed above as not yet written is their third
+family. We weigh sources after fusion in
+[`retrieval/priors.py`](https://github.com/smritikosh/smritikosh/blob/main/smritikosh/retrieval/priors.py)
+rather than weighting each signal inside RRF, and we run no cross-encoder or LLM verification
+stage.
+
+**Measure an index by toggling only the index.** Bhola, Krishnan, Kurmala and NS,
+[_Code Isn't Memory: A Structural Codebase Index Inside a Coding
+Agent_](https://arxiv.org/abs/2606.22417) (arXiv:2606.22417, 2026), holds the agent harness and
+the model fixed, switches only the index on and off, and reports cost per solved task against
+an agentic-grep comparator. [Benchmarks](#benchmarks) borrows that framing. It does not borrow
+the rigour: their protocol adds multiple seeds, a leak audit, and statistical separation, which
+is why our table is offered as recorded sessions rather than a controlled result.
+
+Reciprocal Rank Fusion, Okapi BM25, and Maximal Marginal Relevance all predate these three and
+belong to their own authors; the papers above are where we met them in this shape.
+
 **Built by** [Shantanu Vashishtha](https://github.com/learncoder4848) and
 [Sarvesh Sawant](https://github.com/devsarvesh92).
 
