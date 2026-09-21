@@ -46,6 +46,48 @@ def _open_stores(db_path: str) -> tuple[DuckDBAdapter, DuckDBVectorStore]:
     return storage, vector_store
 
 
+def _build_index_with_progress(
+    repo_path: str,
+    embedder: Embedder,
+    storage: StorageAdapter,
+    vector_store: VectorStore,
+    *,
+    n_files: int | None = None,
+    full: bool = False,
+) -> None:
+    """Run :func:`build_index` with a Click progress bar driven by ``on_file_indexed``.
+
+    *n_files* is the bar length.  When omitted it is counted from *repo_path*
+    with the same filters as the pipeline.  Safe to call from a worker thread
+    (the bar lives on the same thread as the pipeline).
+    """
+    from smritikosh.indexing.pipeline import build_index, count_source_files
+
+    if n_files is None:
+        n_files = count_source_files(repo_path)
+
+    with click.progressbar(
+        length=n_files,
+        show_eta=True,
+        show_percent=True,
+        bar_template="  %(bar)s  %(info)s",
+        fill_char="█",
+        empty_char="░",
+    ) as bar:
+
+        def _on_file(path: str) -> None:  # noqa: E306
+            bar.update(1)
+
+        build_index(
+            repo_path,
+            embedder,
+            storage,
+            vector_store,
+            on_file_indexed=_on_file,
+            full=full,
+        )
+
+
 async def _watch_loop(
     repo_path: str,
     embedder: Embedder,
@@ -66,13 +108,17 @@ async def _watch_loop(
             "Install it with: pip install watchfiles"
         ) from exc
 
-    from smritikosh.indexing.pipeline import build_index
-
     async for changes in awatch(repo_path):
         click.echo(f"  {len(changes)} change(s) detected — re-indexing …")
         # build_index calls asyncio.run() internally; dispatch to a worker
         # thread so it can create its own loop without conflicting with ours.
-        await asyncio.to_thread(build_index, repo_path, embedder, storage, vector_store)
+        await asyncio.to_thread(
+            _build_index_with_progress,
+            repo_path,
+            embedder,
+            storage,
+            vector_store,
+        )
         click.echo("  Done.")
 
 
@@ -117,7 +163,7 @@ def index(
     full: bool,
 ) -> None:
     """Build or incrementally update the vector index for REPO_PATH."""
-    from smritikosh.indexing.pipeline import build_index, count_source_files
+    from smritikosh.indexing.pipeline import count_source_files
 
     emb = _make_embedder()
     storage, vector_store = _open_stores(db_path)
@@ -129,27 +175,14 @@ def index(
         click.echo(f"Indexing {repo_path!r} — {n_files} source file(s) …")
 
         t0 = time.perf_counter()
-        with click.progressbar(
-            length=n_files,
-            show_eta=True,
-            show_percent=True,
-            bar_template="  %(bar)s  %(info)s",
-            fill_char="█",
-            empty_char="░",
-        ) as bar:
-
-            def _on_file(path: str) -> None:  # noqa: E306
-                bar.update(1)
-
-            build_index(
-                repo_path,
-                emb,
-                storage,
-                vector_store,
-                on_file_indexed=_on_file,
-                full=full,
-            )
-
+        _build_index_with_progress(
+            repo_path,
+            emb,
+            storage,
+            vector_store,
+            n_files=n_files,
+            full=full,
+        )
         elapsed = time.perf_counter() - t0
         click.echo(f"Done in {elapsed:.1f}s.")
 

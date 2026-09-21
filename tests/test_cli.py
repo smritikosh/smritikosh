@@ -5,7 +5,8 @@ Coverage map
 _make_embedder          – constructs FastEmbedEmbedder with CodeRankEmbed
 _open_stores            – correct types, shared DuckDB connection
 index command           – happy path, --full ordering, --db-path passthrough,
-                          --watch output, storage.close() in success + error paths
+                          --watch output, watch re-index progress callback,
+                          storage.close() in success + error paths
 search command          – result formatting, empty result, not-indexed guard,
                           --top-k passthrough, multiline snippet indent,
                           no [kind] brackets when chunk_kind is None,
@@ -14,13 +15,14 @@ search command          – result formatting, empty result, not-indexed guard,
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
-from smritikosh.cli import _make_embedder, _open_stores, main
+from smritikosh.cli import _make_embedder, _open_stores, _watch_loop, main
 from smritikosh.models import SearchResult
 
 # ── Stubs ─────────────────────────────────────────────────────────────────────
@@ -256,6 +258,36 @@ def test_index_watch_flag_prints_watching_message(runner, repo, db_path) -> None
 
     assert result.exit_code == 0
     assert "Watching" in result.output
+
+
+def test_watch_loop_passes_on_file_indexed(repo) -> None:
+    """Re-index must drive the same progress-bar callback as the first index."""
+    storage, vector_store = _mock_stores()
+    captured: dict[str, object] = {}
+
+    async def fake_awatch(*_args, **_kwargs):
+        yield {("modified", "foo.py")}
+
+    def fake_build(*_args, **kwargs) -> None:
+        captured["on_file_indexed"] = kwargs.get("on_file_indexed")
+        callback = kwargs.get("on_file_indexed")
+        if callback is not None:
+            callback("foo.py")
+
+    with (
+        patch("watchfiles.awatch", fake_awatch),
+        patch(
+            "smritikosh.indexing.pipeline.build_index",
+            side_effect=fake_build,
+        ),
+        patch(
+            "smritikosh.indexing.pipeline.count_source_files",
+            return_value=1,
+        ),
+    ):
+        asyncio.run(_watch_loop(repo, _StubEmbedder(), storage, vector_store))
+
+    assert callable(captured.get("on_file_indexed"))
 
 
 # ── smritikosh search ─────────────────────────────────────────────────────────
