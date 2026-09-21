@@ -51,6 +51,9 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ### Fixed
 
+- `smritikosh index --watch` now shows the same progress bar as the first index run.
+  Re-index used to print “re-indexing …” and “Done.” with no bar, because the watch
+  loop called `build_index` without `on_file_indexed`.
 - Chunk ids now fold in the file path and line span. They were `sha256(text)[:16]`, so
   identical source in two files shared one id, and the second chunk silently replaced the
   first and vanished from search results. Every stored id changes, so the first
