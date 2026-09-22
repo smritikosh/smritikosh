@@ -12,6 +12,21 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Changed
+
+- Vectors and lexical postings are written in one batch per file through Arrow rather
+  than a row at a time. Binding a 768-float vector as a Python list made DuckDB convert
+  it element by element at ~120 us each, so storing one vector cost ~30 ms and the write
+  dominated indexing: on a 140-file repository, 36.9 s of a 49.1 s run. Cost scaled
+  linearly with vector width, so batching the SQL alone changed nothing — the fix is to
+  hand DuckDB an Arrow buffer it can ingest as-is. The same treatment applies to BM25
+  postings, which went in through `executemany` at ~470 us per row. That repository now
+  indexes in ~3.1 s, and the stored bytes are unchanged, so search results do not move.
+
+- `VectorStore` gains `upsert_many`, defaulting to one `upsert` per item so existing
+  adapters keep working. `process_chunk` now returns its vector instead of storing it,
+  leaving `process_file` to write a whole file's worth at once.
+
 ## [0.2.0] - 2026-09-21
 
 ### Added

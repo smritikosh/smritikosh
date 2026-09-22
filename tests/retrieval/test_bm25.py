@@ -105,16 +105,15 @@ def test_should_rollback_replacement_when_posting_insert_fails() -> None:
     store.setup()
     store.upsert([_chunk("one", "src/a.py", "before", "load")])
     failing_connection = MagicMock(wraps=connection)
-    calls: int = 0
 
-    def fail_second_insert(query: str, values: object) -> object:
-        nonlocal calls
-        calls += 1
-        if calls == 2:
+    def fail_posting_insert(query: str, *args: object) -> object:
+        # Postings go in last; failing there leaves the documents already
+        # inserted, which is exactly what the transaction has to undo.
+        if "lexical_terms" in query and "INSERT" in query:
             raise RuntimeError("posting insert failed")
-        return connection.executemany(query, values)
+        return connection.execute(query, *args)
 
-    failing_connection.executemany.side_effect = fail_second_insert
+    failing_connection.execute.side_effect = fail_posting_insert
     store._connection = failing_connection
 
     with pytest.raises(RuntimeError, match="posting insert failed"):
