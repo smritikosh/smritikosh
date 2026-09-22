@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from smritikosh.constants import DEFAULT_MODEL
+from smritikosh.constants import CODE_QUERY_INSTRUCTION, DEFAULT_MODEL
 from smritikosh.ports.embedder import Embedder
 
 if TYPE_CHECKING:
@@ -23,9 +23,9 @@ __all__ = ["FastEmbedEmbedder"]
 
 logger = logging.getLogger(__name__)
 
-#: CodeRankEmbed's own instruction.  Its model card marks this as *required*:
-#: without it the query lands in document space and retrieval degrades badly.
-_CODE_INSTRUCTION = "Represent this query for searching relevant code: "
+#: CodeRankEmbed's own required query instruction.  Lives in constants because
+#: the MPS adapter serves the same model and the two must not drift.
+_CODE_INSTRUCTION = CODE_QUERY_INSTRUCTION
 
 # INT8 build chosen over FP32 (139 MB vs 548 MB) using the `reduce_range=True`
 # export — naive INT8 produces degenerate embeddings on pre-VNNI x86 CPUs.

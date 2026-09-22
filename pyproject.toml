@@ -49,6 +49,20 @@ dependencies = [
     "toons>=0.7",
 ]
 
+# Apple-silicon only, and ~2.5 GB of wheels, so it stays out of the base
+# install: `pip install 'smritikosh[mps]'` then `--embedder mps`.
+# transformers 5 dropped get_extended_attention_mask, which CodeRankEmbed's
+# trust_remote_code module still calls, hence the upper bound.
+[project.optional-dependencies]
+mps = [
+    "torch>=2.4",
+    "transformers>=4.40,<5",
+    "sentence-transformers>=3.0",
+    # CodeRankEmbed's trust_remote_code module imports einops; transformers
+    # refuses to build the class without it, and nothing else pulls it in.
+    "einops>=0.7",
+]
+
 [project.scripts]
 smritikosh = "smritikosh.cli:main"
 
