@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 __all__ = ["VectorStore"]
 
@@ -17,6 +17,17 @@ class VectorStore(ABC):
 
     @abstractmethod
     def upsert(self, chunk_id: str, vector: list[float]) -> None: ...
+
+    def upsert_many(self, items: Sequence[tuple[str, list[float]]]) -> None:
+        """Store several vectors at once.
+
+        Defaults to one :meth:`upsert` per item.  Override wherever writing a
+        vector row-by-row is expensive — on DuckDB the per-row parameter bind
+        walks every float, so this is the difference between 30 ms and 0.5 ms
+        per vector.
+        """
+        for chunk_id, vector in items:
+            self.upsert(chunk_id, vector)
 
     @abstractmethod
     def search(self, query_vector: list[float], top_k: int) -> list[tuple[str, float]]:
