@@ -12,6 +12,25 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Added
+
+- An `mps` embedder that runs CodeRankEmbed on the Apple GPU through PyTorch, behind the
+  existing `Embedder` port and the new `smritikosh[mps]` extra. Measured on an M4 Max,
+  77 chunks/s against 12 for the default single ONNX session on the CPU. Opt in with
+  `--embedder mps` on `index` and `search`, or `SMRITIKOSH_EMBEDDER=mps` so every entry
+  point agrees. Apple silicon only and ~2.5 GB of wheels, so the CPU path stays the
+  default — and loading the checkpoint costs a few seconds per process, which a one-shot
+  `search` pays in full, so it earns its keep on indexing rather than on queries.
+
+  It runs the fp32 checkpoint while the ONNX path runs an INT8 export, and the two are not
+  interchangeable: measured cosine between their vectors is 0.87–0.90 and they rank
+  differently. `model_id` carries the backend, so an index has to be built and searched
+  with the same one.
+
+- `CODE_QUERY_INSTRUCTION` in `constants`, the required CodeRankEmbed query instruction.
+  Both embedder adapters now read it from there rather than keeping their own copy, which
+  could drift — a changed instruction silently invalidates every cached embedding.
+
 ## [0.2.0] - 2026-09-21
 
 ### Added
