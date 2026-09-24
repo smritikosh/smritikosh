@@ -101,6 +101,10 @@ def test_batched_write_stores_what_row_by_row_stored(
 ) -> None:
     """The Arrow path must be a pure speed change — identical bytes, so search
     results cannot shift. Compares full-width realistic vectors, not axes.
+
+    The baseline binds each vector as a parameter, the way the store did before
+    Arrow. Going through ``upsert`` would not compare anything: it delegates to
+    ``upsert_many``, so both sides would be the Arrow path.
     """
     dims = 768
     vectors = {
@@ -111,7 +115,10 @@ def test_batched_write_stores_what_row_by_row_stored(
     row_by_row = DuckDBVectorStore(con=duckdb.connect(":memory:"))
     row_by_row.setup(dims)
     for chunk_id, vector in vectors.items():
-        row_by_row.upsert(chunk_id, vector)
+        row_by_row._con.execute(
+            "INSERT OR REPLACE INTO vectors (chunk_id, vector) VALUES (?, ?)",
+            [chunk_id, vector],
+        )
 
     batched = DuckDBVectorStore(con=duckdb.connect(":memory:"))
     batched.setup(dims)
@@ -119,3 +126,73 @@ def test_batched_write_stores_what_row_by_row_stored(
 
     probe = vectors["chunk3"]
     assert row_by_row.search(probe, top_k=5) == batched.search(probe, top_k=5)
+
+
+# ── Vector width ──────────────────────────────────────────────────────────────
+
+
+def test_should_reject_a_batch_holding_an_over_long_vector(
+    store: DuckDBVectorStore,
+) -> None:
+    """The case that used to corrupt: one wide vector shifted the rest silently."""
+    store.setup(4)
+
+    with pytest.raises(ValueError, match="expected vectors of width 4"):
+        store.upsert_many(
+            [
+                ("first", X_AXIS),
+                ("too-wide", [0.0, 1.0, 0.0, 0.0, 99.0]),
+                ("third", [0.0, 0.0, 1.0, 0.0]),
+            ]
+        )
+
+    assert store.search(X_AXIS, top_k=3) == []
+
+
+def test_should_reject_a_batch_holding_a_short_vector(
+    store: DuckDBVectorStore,
+) -> None:
+    store.setup(4)
+
+    with pytest.raises(ValueError, match="expected vectors of width 4"):
+        store.upsert_many([("first", X_AXIS), ("too-short", [0.0, 1.0])])
+
+
+def test_should_reject_a_batch_that_is_uniformly_the_wrong_width(
+    store: DuckDBVectorStore,
+) -> None:
+    store.setup(4)
+
+    with pytest.raises(ValueError, match="expected vectors of width 4"):
+        store.upsert_many([("narrow", [1.0, 0.0])])
+
+
+def test_should_take_the_width_from_the_column_not_the_first_item(
+    store: DuckDBVectorStore,
+) -> None:
+    store.setup(4)
+
+    with pytest.raises(ValueError, match="expected vectors of width 4"):
+        store.upsert_many([("wrong-first", [1.0, 0.0, 0.0]), ("right", X_AXIS)])
+
+
+def test_should_report_every_offending_vector_not_just_the_first(
+    store: DuckDBVectorStore,
+) -> None:
+    store.setup(4)
+
+    with pytest.raises(ValueError, match="2 of 3 differ"):
+        store.upsert_many(
+            [("ok", X_AXIS), ("bad", [1.0]), ("also-bad", [1.0, 2.0, 3.0])]
+        )
+
+
+def test_should_fall_back_to_the_batch_width_before_setup(
+    store: DuckDBVectorStore,
+) -> None:
+    """Without a stored width the guard must not invent one and reject the batch.
+
+    A store this fresh has no ``vectors`` table, so it fails on the catalog.
+    """
+    with pytest.raises(duckdb.CatalogException):
+        store.upsert_many([("a", X_AXIS), ("b", Y_AXIS)])

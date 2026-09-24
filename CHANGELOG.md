@@ -16,16 +16,34 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 - Vectors and lexical postings are written in one batch per file through Arrow rather
   than a row at a time. Binding a 768-float vector as a Python list made DuckDB convert
-  it element by element at ~120 us each, so storing one vector cost ~30 ms and the write
-  dominated indexing: on a 140-file repository, 36.9 s of a 49.1 s run. Cost scaled
-  linearly with vector width, so batching the SQL alone changed nothing — the fix is to
-  hand DuckDB an Arrow buffer it can ingest as-is. The same treatment applies to BM25
-  postings, which went in through `executemany` at ~470 us per row. That repository now
-  indexes in ~3.1 s, and the stored bytes are unchanged, so search results do not move.
+  it element by element at ~40 us each, so storing one vector cost ~30 ms and the write
+  dominated indexing: on a 140-file repository, 36.9 s of a 49.1 s run. Per-element cost
+  held flat from 96 to 768 dims, so the work is per element rather than per statement and
+  batching the SQL alone changed nothing — the fix is to hand DuckDB an Arrow buffer it
+  can ingest as-is. The same treatment applies to BM25 postings, which went in through
+  `executemany` at ~470 us per row. That repository now indexes in ~3.1 s, and the stored
+  bytes are unchanged, so search results do not move.
 
 - `VectorStore` gains `upsert_many`, defaulting to one `upsert` per item so existing
   adapters keep working. `process_chunk` now returns its vector instead of storing it,
   leaving `process_file` to write a whole file's worth at once.
+
+### Fixed
+
+- `upsert_many` takes the vector width from the stored column rather than from the first
+  item in the batch, and rejects a batch that is not uniformly that wide. Binding one
+  vector per statement made DuckDB's `FLOAT[dims]` cast the guard; Arrow cuts the batch
+  into fixed-width rows first, so `np.fromiter` dropped the overflow past `count` and one
+  over-long vector shifted every vector after it into the wrong slots, stored as
+  well-formed rows the cast had no reason to reject.
+
+- Arrow handoffs are serialised on a reentrant lock, spanning the lexical store's
+  transaction rather than only the inserts inside it. `register`/`unregister` mutate
+  catalog state owned by the connection: two threads doing it at once deadlock inside
+  DuckDB, and doing it during another thread's open transaction invalidates the pending
+  result. Parameter binding tolerated both. This does not make a shared connection
+  thread-safe — readers take no lock — so use one connection per thread; separate
+  connections to the same file are unaffected.
 
 ## [0.2.0] - 2026-09-21
 

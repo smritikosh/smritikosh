@@ -8,6 +8,7 @@ from typing import Final
 
 import duckdb
 
+from smritikosh.adapters._arrow import INCOMING, insert_arrow
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.ports.vector_store import VectorStore
 
@@ -63,10 +64,10 @@ class DuckDBVectorStore(VectorStore):
         """Write several vectors in one statement, via Arrow.
 
         Binding a vector as a Python list makes DuckDB convert it one float at
-        a time: measured at ~120 us per element, so a 768-wide vector costs
-        ~30 ms to store and the write dominates a whole index run.  Cost scales
-        linearly with width, confirming it is per-element work rather than
-        per-statement — batching the SQL alone changes nothing.
+        a time: measured at ~40 us per element, so a 768-wide vector costs
+        ~30 ms to store and the write dominates a whole index run.  Per-element
+        cost holds flat from 96 to 768 dims, confirming it is per-element work
+        rather than per-statement — batching the SQL alone changes nothing.
 
         An Arrow FixedSizeListArray is already a contiguous float32 buffer in
         DuckDB's own layout, so ingesting it skips that conversion entirely.
@@ -78,7 +79,18 @@ class DuckDBVectorStore(VectorStore):
         import numpy as np
         import pyarrow as pa
 
-        dims = len(items[0][1])
+        # Width from the column, not from items[0]: np.fromiter stops at count
+        # and drops the overflow, so one over-long vector would shift every
+        # vector after it into the wrong slots — and Arrow cuts the batch into
+        # fixed-width rows, leaving the FLOAT[dims] cast nothing to reject.
+        dims = self._dims if self._dims is not None else len(items[0][1])
+        wrong = [(cid, len(v)) for cid, v in items if len(v) != dims]
+        if wrong:
+            raise ValueError(
+                f"expected vectors of width {dims}; {len(wrong)} of {len(items)} "
+                f"differ, first: {wrong[:3]}"
+            )
+
         flat = np.fromiter(
             (value for _, vector in items for value in vector),
             dtype=np.float32,
@@ -90,16 +102,12 @@ class DuckDBVectorStore(VectorStore):
                 "vector": pa.FixedSizeListArray.from_arrays(pa.array(flat), dims),
             }
         )
-        # Registered under a private name so a concurrent caller cannot see a
-        # half-built relation; the INSERT consumes it immediately.
-        self._con.register("_incoming_vectors", incoming)
-        try:
-            self._con.execute(
-                "INSERT OR REPLACE INTO vectors (chunk_id, vector) "
-                "SELECT chunk_id, vector FROM _incoming_vectors"
-            )
-        finally:
-            self._con.unregister("_incoming_vectors")
+        insert_arrow(
+            self._con,
+            incoming,
+            f"INSERT OR REPLACE INTO vectors (chunk_id, vector) "  # noqa: S608
+            f"SELECT chunk_id, vector FROM {INCOMING}",
+        )
 
     def search(self, query_vector: list[float], top_k: int) -> list[tuple[str, float]]:
         if self._dims is None:
