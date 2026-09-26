@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from pathlib import PurePosixPath
 from typing import Final
@@ -18,6 +19,7 @@ DEFAULT_EXCLUDE_DIRS: Final = frozenset(
         ".git",
         ".mypy_cache",
         ".next",
+        ".claude",
         ".pytest_cache",
         ".tox",
         ".venv",
@@ -31,6 +33,10 @@ DEFAULT_EXCLUDE_DIRS: Final = frozenset(
         "venv",
     }
 )
+
+# ``.venv`` and ``venv`` are in the set above. Numbered checkouts such as
+# ``.venv2`` are the same kind of directory and miss an exact-name check.
+_VENV_DIR: Final = re.compile(r"^\.?venv\d+$")
 
 
 def iter_source_files(source: FileSource, router: FileRouter) -> Iterator[SourceFile]:
@@ -60,4 +66,9 @@ def iter_source_files(source: FileSource, router: FileRouter) -> Iterator[Source
 def _in_excluded_dir(path: str) -> bool:
     """Return True when any directory segment of path is build or tool noise."""
     segments = PurePosixPath(path).parts[:-1]
-    return any(segment in DEFAULT_EXCLUDE_DIRS for segment in segments)
+    return any(_is_excluded_segment(segment) for segment in segments)
+
+
+def _is_excluded_segment(segment: str) -> bool:
+    """Return True for a build, tool, or virtualenv directory name."""
+    return segment in DEFAULT_EXCLUDE_DIRS or _VENV_DIR.fullmatch(segment) is not None

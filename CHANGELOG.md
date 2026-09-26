@@ -12,6 +12,10 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Fixed
+
+- Indexing skips `.claude` and numbered virtualenvs such as `.venv2`. Those directories were counted as source, so the progress estimate covered site-packages and agent config.
+
 ## [0.2.0] - 2026-09-21
 
 ### Added
