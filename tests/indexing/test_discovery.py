@@ -61,6 +61,23 @@ def test_should_drop_files_under_excluded_directories(router: FileRouter) -> Non
     assert _paths(source, router) == ["src/app.py"]
 
 
+def test_should_drop_numbered_virtualenvs_and_claude_config(
+    router: FileRouter,
+) -> None:
+    """``.venv2`` and ``.claude`` are not source, and both inflate the file count."""
+    source = FakeFileSource(
+        {
+            "src/app.py": "keep",
+            "src/venv2.py": "keep",
+            ".venv2/lib/site-packages/pkg/__init__.py": "drop",
+            "svc/venv2/lib/dep.py": "drop",
+            ".claude/skills/oncall/helper.py": "drop",
+        }
+    )
+
+    assert _paths(source, router) == ["src/app.py", "src/venv2.py"]
+
+
 def test_should_drop_files_the_source_reports_ignored(router: FileRouter) -> None:
     source = FakeFileSource(
         {"src/app.py": "keep", "secrets/key.py": "drop"},
