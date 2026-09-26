@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from tree_sitter import Parser
+from tree_sitter_language_pack import get_language
+
+from smritikosh.indexing.extractor import extract_file
 from smritikosh.indexing.strategies._helpers import build_chunk
 from smritikosh.indexing.strategies.section import (
     SectionChunkingStrategy,
@@ -439,3 +443,50 @@ class TestJsonSectionChunking:
 
         # Every chunk is labelled with the parent, not the fragment-sized keys.
         assert all(c.text.startswith("// outer\n") for c in chunks)
+
+
+class TestYamlSectionChunking:
+    """YAML reuses the JSON depth rules and labels a document Kind/name."""
+
+    def test_should_label_a_short_manifest_with_its_resource(self) -> None:
+        content = (
+            "apiVersion: batch/v1\n"
+            "kind: CronJob\n"
+            "metadata:\n"
+            "  name: trig-stmt-gen\n"
+            "spec:\n"
+            '  schedule: "0 6 * * *"\n'
+        )
+        tree = Parser(get_language("yaml")).parse(content.encode())
+        source = parsed(content, "cron.yaml", language="yaml")
+        source.tree = tree
+        chunks = SectionChunkingStrategy(max_chars=500).chunk(
+            source, extract_file(source, has_tags_scm=True)
+        )
+
+        assert len(chunks) == 1
+        assert chunks[0].text.startswith(
+            "# CronJob/trig-stmt-gen apiVersion+kind+metadata+spec\n"
+        )
+        assert 'schedule: "0 6 * * *"' in chunks[0].text
+
+    def test_should_split_an_oversized_spec_on_its_own_keys(self) -> None:
+        content = (
+            "kind: CronJob\n"
+            "metadata:\n"
+            "  name: trig-stmt-gen\n"
+            "spec:\n"
+            f'  schedule: "{"x" * 200}"\n'
+            f'  history: "{"y" * 200}"\n'
+        )
+        tree = Parser(get_language("yaml")).parse(content.encode())
+        source = parsed(content, "cron.yaml", language="yaml")
+        source.tree = tree
+        chunks = SectionChunkingStrategy(max_chars=300).chunk(
+            source, extract_file(source, has_tags_scm=True)
+        )
+
+        first_lines = [chunk.text.splitlines()[0] for chunk in chunks]
+        assert "# CronJob/trig-stmt-gen spec.schedule" in first_lines
+        assert "# CronJob/trig-stmt-gen spec.history" in first_lines
+        assert "# CronJob/trig-stmt-gen spec" not in first_lines

@@ -12,6 +12,10 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Added
+
+- `.yaml` and `.yml` files are indexed. A manifest is split on its keys, and a Kubernetes document is labelled `Kind/name` when `kind` and `metadata.name` are present.
+
 ## [0.2.0] - 2026-09-21
 
 ### Added
