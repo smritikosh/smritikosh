@@ -47,6 +47,11 @@ def _parse(language: str, source: str, *, path: str) -> ParsedFile:
             '{"name": "demo"}\n',
             ("definition.section", "name"),
         ),
+        (
+            "yaml",
+            "kind: CronJob\n",
+            ("definition.section", "kind"),
+        ),
     ],
 )
 def test_should_extract_expected_definition_for_each_query_language(
