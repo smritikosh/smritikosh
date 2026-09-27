@@ -44,6 +44,7 @@ class _Embedder(Embedder):
 class _VectorStore:
     def __init__(self) -> None:
         self._store: dict[str, list[float]] = {}
+        self.batch_sizes: list[int] = []
 
     def setup(self, dims: int) -> None: ...  # noqa: D401
     def exists(self, chunk_id: str) -> bool:
@@ -51,6 +52,11 @@ class _VectorStore:
 
     def upsert(self, chunk_id: str, vector: list[float]) -> None:
         self._store[chunk_id] = vector
+
+    def upsert_many(self, items) -> None:
+        self.batch_sizes.append(len(items))
+        for chunk_id, vector in items:
+            self._store[chunk_id] = vector
 
     def delete(self, chunk_id: str) -> None:
         self._store.pop(chunk_id, None)
@@ -243,7 +249,8 @@ async def test_process_chunk_skips_when_vector_already_exists() -> None:
     assert list(vs._store.values()) == [[0.1, 0.2, 0.3, 0.4]]  # unchanged
 
 
-async def test_process_chunk_embeds_and_upserts_new_chunk() -> None:
+async def test_process_chunk_returns_the_embedded_vector() -> None:
+    """The caller writes it, so a whole file lands in one round trip."""
     vs = _VectorStore()
     chunk = _make_chunk()
 
@@ -251,10 +258,43 @@ async def test_process_chunk_embeds_and_upserts_new_chunk() -> None:
     ctx.provide(VECTOR_STORE, vs)
     ctx.provide(EMBEDDER, _Embedder())
     with ctx:
-        await process_chunk(chunk)
+        result = await process_chunk(chunk)
 
-    assert chunk.id in vs._store
-    assert len(vs._store[chunk.id]) == 4
+    assert result is not None
+    chunk_id, vector = result
+    assert chunk_id == chunk.id
+    assert len(vector) == 4
+    assert vs._store == {}  # process_chunk must not write
+
+
+async def test_process_chunk_returns_none_for_an_already_stored_chunk() -> None:
+    vs = _VectorStore()
+    chunk = _make_chunk()
+    vs.upsert(chunk.id, [0.0, 0.0, 0.0, 0.0])
+
+    ctx = PipelineContext()
+    ctx.provide(VECTOR_STORE, vs)
+    ctx.provide(EMBEDDER, _Embedder())
+    with ctx:
+        assert await process_chunk(chunk) is None
+
+
+async def test_process_file_writes_every_vector_in_one_batch() -> None:
+    """Regression: one write per chunk made storing vectors 75% of a run."""
+    storage = _Storage()
+    vs = _VectorStore()
+    source = _make_source()
+
+    ctx = PipelineContext()
+    ctx.provide(STORAGE, storage)
+    ctx.provide(VECTOR_STORE, vs)
+    ctx.provide(EMBEDDER, _Embedder())
+    ctx.provide(LEXICAL_STORE, _LexicalStore())
+    with ctx:
+        await process_file(source)
+
+    assert len(vs.batch_sizes) == 1
+    assert vs.batch_sizes[0] == len(vs._store)
 
 
 # ── process_file ──────────────────────────────────────────────────────────────
