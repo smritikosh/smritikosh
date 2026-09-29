@@ -49,6 +49,10 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ### Fixed
 
+- The `mps` extra's requirements are marked Apple silicon only. uv solves every extra
+  for each `required-environments` entry, including Intel Macs, and `torch>=2.4` has no
+  `macosx_x86_64` wheel, so an unmarked extra made `uv sync` unsatisfiable.
+
 - `upsert_many` takes the vector width from the stored column rather than from the first
   item in the batch, and rejects a batch that is not uniformly that wide. Binding one
   vector per statement made DuckDB's `FLOAT[dims]` cast the guard; Arrow cuts the batch
