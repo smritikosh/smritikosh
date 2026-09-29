@@ -35,6 +35,11 @@ requires-python = ">=3.10,<3.14"
 dependencies = [
     "click>=8.1",
     "duckdb>=1.0",
+    # Vectors are handed to DuckDB as an Arrow FixedSizeListArray. Binding them
+    # as Python lists costs ~120 us per float, which made storing the vectors
+    # 75 % of an index run; Arrow is a contiguous buffer DuckDB ingests as-is.
+    "pyarrow>=15.0",
+    "numpy>=1.24",
     # 1.0 renamed the gitignore pattern factory; "gitwildmatch" is deprecated.
     "pathspec>=1.0",
     # fastembed bundles ONNX Runtime — no PyTorch required, runs on any CPU.

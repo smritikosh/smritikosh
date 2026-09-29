@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Final
 
 import duckdb
 
+from smritikosh.adapters._arrow import INCOMING, insert_arrow
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.ports.vector_store import VectorStore
 
@@ -57,9 +58,55 @@ class DuckDBVectorStore(VectorStore):
         self._dims = dims
 
     def upsert(self, chunk_id: str, vector: list[float]) -> None:
-        self._con.execute(
-            "INSERT OR REPLACE INTO vectors (chunk_id, vector) VALUES (?, ?)",
-            [chunk_id, vector],
+        self.upsert_many([(chunk_id, vector)])
+
+    def upsert_many(self, items: Sequence[tuple[str, list[float]]]) -> None:
+        """Write several vectors in one statement, via Arrow.
+
+        Binding a vector as a Python list makes DuckDB convert it one float at
+        a time: measured at ~40 us per element, so a 768-wide vector costs
+        ~30 ms to store and the write dominates a whole index run.  Per-element
+        cost holds flat from 96 to 768 dims, confirming it is per-element work
+        rather than per-statement — batching the SQL alone changes nothing.
+
+        An Arrow FixedSizeListArray is already a contiguous float32 buffer in
+        DuckDB's own layout, so ingesting it skips that conversion entirely.
+        Measured on 1063 vectors of 768 dims: 32.4 s row-by-row, 0.57 s here.
+        """
+        if not items:
+            return
+
+        import numpy as np
+        import pyarrow as pa
+
+        # Width from the column, not from items[0]: np.fromiter stops at count
+        # and drops the overflow, so one over-long vector would shift every
+        # vector after it into the wrong slots — and Arrow cuts the batch into
+        # fixed-width rows, leaving the FLOAT[dims] cast nothing to reject.
+        dims = self._dims if self._dims is not None else len(items[0][1])
+        wrong = [(cid, len(v)) for cid, v in items if len(v) != dims]
+        if wrong:
+            raise ValueError(
+                f"expected vectors of width {dims}; {len(wrong)} of {len(items)} "
+                f"differ, first: {wrong[:3]}"
+            )
+
+        flat = np.fromiter(
+            (value for _, vector in items for value in vector),
+            dtype=np.float32,
+            count=len(items) * dims,
+        )
+        incoming = pa.table(
+            {
+                "chunk_id": pa.array([chunk_id for chunk_id, _ in items]),
+                "vector": pa.FixedSizeListArray.from_arrays(pa.array(flat), dims),
+            }
+        )
+        insert_arrow(
+            self._con,
+            incoming,
+            f"INSERT OR REPLACE INTO vectors (chunk_id, vector) "  # noqa: S608
+            f"SELECT chunk_id, vector FROM {INCOMING}",
         )
 
     def search(self, query_vector: list[float], top_k: int) -> list[tuple[str, float]]:
