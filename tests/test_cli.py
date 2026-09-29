@@ -98,9 +98,14 @@ def _result(
 # ── _make_embedder ────────────────────────────────────────────────────────────
 
 
-def test_make_embedder_uses_coderankembed() -> None:
+def test_make_embedder_uses_coderankembed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from smritikosh.adapters.embedder import EMBEDDER_ENV_VAR
     from smritikosh.adapters.embedder.fastembed import FastEmbedEmbedder
     from smritikosh.constants import DEFAULT_MODEL
+
+    # The factory falls back to the environment, so a developer with
+    # SMRITIKOSH_EMBEDDER set would otherwise get a different backend here.
+    monkeypatch.delenv(EMBEDDER_ENV_VAR, raising=False)
 
     emb = _make_embedder()
 
@@ -211,6 +216,68 @@ def test_index_db_path_forwarded_to_open_stores(runner, repo, tmp_path: Path) ->
         runner.invoke(main, ["index", repo, "--db-path", custom_db])
 
     mock_open.assert_called_once_with(custom_db)
+
+
+def test_index_embedder_flag_selects_the_backend(runner, repo, db_path) -> None:
+    storage, vector_store = _mock_stores()
+
+    with (
+        patch(
+            "smritikosh.cli._make_embedder", return_value=_StubEmbedder()
+        ) as mock_emb,
+        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
+        patch("smritikosh.indexing.pipeline.build_index"),
+    ):
+        result = runner.invoke(
+            main, ["index", repo, "--db-path", db_path, "--embedder", "mps"]
+        )
+
+    assert result.exit_code == 0
+    mock_emb.assert_called_once_with("mps")
+
+
+def test_index_without_embedder_flag_defers_to_the_factory(
+    runner, repo, db_path
+) -> None:
+    """None lets make_embedder read the env var, so every command agrees."""
+    storage, vector_store = _mock_stores()
+
+    with (
+        patch(
+            "smritikosh.cli._make_embedder", return_value=_StubEmbedder()
+        ) as mock_emb,
+        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
+        patch("smritikosh.indexing.pipeline.build_index"),
+    ):
+        runner.invoke(main, ["index", repo, "--db-path", db_path])
+
+    mock_emb.assert_called_once_with(None)
+
+
+def test_index_rejects_an_unknown_embedder(runner, repo, db_path) -> None:
+    result = runner.invoke(
+        main, ["index", repo, "--db-path", db_path, "--embedder", "bert"]
+    )
+
+    assert result.exit_code != 0
+
+
+def test_search_embedder_flag_selects_the_backend(runner, db_path) -> None:
+    """A mismatched backend would silently compare across vector spaces."""
+    storage, vector_store = _mock_stores()
+    mock_idx = MagicMock()
+    mock_idx.search = AsyncMock(return_value=[])
+
+    with (
+        patch(
+            "smritikosh.cli._make_embedder", return_value=_StubEmbedder()
+        ) as mock_emb,
+        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
+        patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
+    ):
+        runner.invoke(main, ["search", "q", "--db-path", db_path, "--embedder", "mps"])
+
+    mock_emb.assert_called_once_with("mps")
 
 
 def test_index_storage_closed_on_success(runner, repo, db_path) -> None:

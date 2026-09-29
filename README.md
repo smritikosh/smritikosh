@@ -106,7 +106,7 @@ today.
 | **Source** | Local filesystem, `.gitignore`-aware | Slack, Google Drive, S3, Confluence, meeting notes |
 | **Structure** | Python, TypeScript, JavaScript, Java, Kotlin, Markdown, MDX, JSON, TOML | Go, Rust, C#; transcripts by speaker turn, tickets by field |
 | **Store** | DuckDB, one local file | Postgres with pgvector, Qdrant, Neo4j |
-| **Embedder** | FastEmbed on local ONNX, no API key | OpenAI, Voyage, or any hosted model |
+| **Embedder** | FastEmbed on local ONNX, no API key; Apple GPU via `smritikosh[mps]` | OpenAI, Voyage, or any hosted model |
 | **Retrieval** | Dense vectors and BM25 | Call graph: callers and callees |
 
 ## How it works

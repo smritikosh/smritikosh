@@ -8,13 +8,17 @@ from __future__ import annotations
 
 import pytest
 
-from smritikosh.adapters.embedder import EMBEDDER_CHOICES, make_embedder
+from smritikosh.adapters.embedder import (
+    EMBEDDER_CHOICES,
+    EMBEDDER_ENV_VAR,
+    make_embedder,
+)
 
 # ── EMBEDDER_CHOICES ──────────────────────────────────────────────────────────
 
 
 def test_embedder_choices_contains_all_supported_backends() -> None:
-    assert set(EMBEDDER_CHOICES) == {"fastembed"}
+    assert set(EMBEDDER_CHOICES) == {"fastembed", "mps"}
 
 
 def test_embedder_choices_is_a_list_of_strings() -> None:
@@ -31,8 +35,54 @@ def test_make_embedder_fastembed_returns_fast_embed_embedder() -> None:
     assert isinstance(make_embedder("fastembed"), FastEmbedEmbedder)
 
 
-def test_make_embedder_defaults_to_fastembed() -> None:
+def test_make_embedder_defaults_to_fastembed(monkeypatch: pytest.MonkeyPatch) -> None:
     from smritikosh.adapters.embedder.fastembed import FastEmbedEmbedder
+
+    monkeypatch.delenv(EMBEDDER_ENV_VAR, raising=False)
+
+    assert isinstance(make_embedder(), FastEmbedEmbedder)
+
+
+# ── make_embedder — mps ───────────────────────────────────────────────────────
+
+
+def test_make_embedder_mps_returns_mps_embedder() -> None:
+    from smritikosh.adapters.embedder.mps import MpsEmbedder
+
+    assert isinstance(make_embedder("mps"), MpsEmbedder)
+
+
+def test_make_embedder_mps_does_not_load_torch() -> None:
+    """Constructing must stay cheap — the GPU model loads on first encode."""
+    assert make_embedder("mps")._model is None  # type: ignore[attr-defined]
+
+
+# ── make_embedder — env var ───────────────────────────────────────────────────
+
+
+def test_env_var_selects_the_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every entry point must agree, so the choice lives in the environment."""
+    from smritikosh.adapters.embedder.mps import MpsEmbedder
+
+    monkeypatch.setenv(EMBEDDER_ENV_VAR, "mps")
+
+    assert isinstance(make_embedder(), MpsEmbedder)
+
+
+def test_explicit_name_beats_the_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    from smritikosh.adapters.embedder.fastembed import FastEmbedEmbedder
+
+    monkeypatch.setenv(EMBEDDER_ENV_VAR, "mps")
+
+    assert isinstance(make_embedder("fastembed"), FastEmbedEmbedder)
+
+
+def test_blank_env_var_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from smritikosh.adapters.embedder.fastembed import FastEmbedEmbedder
+
+    monkeypatch.setenv(EMBEDDER_ENV_VAR, "")
 
     assert isinstance(make_embedder(), FastEmbedEmbedder)
 

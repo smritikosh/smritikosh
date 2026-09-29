@@ -54,6 +54,24 @@ dependencies = [
     "toons>=0.7",
 ]
 
+# Apple-silicon only, and ~2.5 GB of wheels, so it stays out of the base
+# install: `pip install 'smritikosh[mps]'` then `--embedder mps`.
+# transformers 5 dropped get_extended_attention_mask, which CodeRankEmbed's
+# trust_remote_code module still calls, hence the upper bound.
+# Each requirement carries an arm64-macOS marker. uv solves every extra for
+# every required-environment below, including Intel Macs, and torch>=2.4
+# publishes no macosx_x86_64 wheel. An unmarked extra makes that solve fail
+# and `uv sync` exits before lint or tests.
+[project.optional-dependencies]
+mps = [
+    "torch>=2.4 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "transformers>=4.40,<5 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sentence-transformers>=3.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    # CodeRankEmbed's trust_remote_code module imports einops; transformers
+    # refuses to build the class without it, and nothing else pulls it in.
+    "einops>=0.7 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+]
+
 [project.scripts]
 smritikosh = "smritikosh.cli:main"
 
