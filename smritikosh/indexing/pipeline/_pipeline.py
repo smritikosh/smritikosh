@@ -72,13 +72,17 @@ def _embed_one(texts: list[str]) -> list[list[float]]:
 
 
 @sm.tracked
-async def process_chunk(chunk: Chunk) -> None:
-    """Embed and upsert one chunk; skip when its location and text are unchanged."""
+async def process_chunk(chunk: Chunk) -> tuple[str, list[float]] | None:
+    """Embed one chunk; return None when its location and text are unchanged.
+
+    Returns the vector rather than storing it so the caller can write a whole
+    file's worth in one round trip — see :meth:`VectorStore.upsert_many`.
+    """
     vector_store = use_context(VECTOR_STORE)
     if vector_store.exists(chunk.id):
-        return
+        return None
     vector: list[float] = await _embed_one(chunk.text)
-    vector_store.upsert(chunk.id, vector)
+    return chunk.id, vector
 
 
 # ── Per-file processing ───────────────────────────────────────────────────────
@@ -105,7 +109,12 @@ async def process_file(source: SourceFile) -> None:
     storage.upsert_file_node(source)
     storage.upsert_chunk_nodes(chunks)
     lexical_store.upsert(chunks)
-    await sm.gather(process_chunk, chunks)
+
+    embedded = await sm.gather(process_chunk, chunks)
+    # One write per file rather than per chunk: the vectors are only committed
+    # once the whole file has embedded, which matches the crash semantics
+    # below — the file hash lands last, so an interrupted file is redone.
+    vector_store.upsert_many([pair for pair in embedded if pair is not None])
 
     # Write file hash after success — a crash forces full re-process next run.
     storage.set_file_hash(

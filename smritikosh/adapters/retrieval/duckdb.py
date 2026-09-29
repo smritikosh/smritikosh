@@ -7,6 +7,7 @@ from typing import Final
 
 import duckdb
 
+from smritikosh.adapters._arrow import INCOMING, WRITE_LOCK, insert_arrow
 from smritikosh.adapters.retrieval.source import DuckDBSourceReader
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.models import Chunk, SearchResult
@@ -97,21 +98,46 @@ class DuckDBBm25Store(LexicalStore):
             postings.extend(
                 (chunk.id, term, frequency) for term, frequency in frequencies.items()
             )
-        self._connection.begin()
-        try:
-            self._delete_many(chunk_ids)
-            self._connection.executemany(
-                "INSERT INTO lexical_documents VALUES (?, ?, ?)",
-                documents,
-            )
-            self._connection.executemany(
-                "INSERT INTO lexical_terms VALUES (?, ?, ?)",
-                postings,
-            )
-            self._connection.commit()
-        except Exception:
-            self._connection.rollback()
-            raise
+        # The lock spans the transaction, not just the handoffs inside it: a
+        # batch registered on this connection between begin() and commit()
+        # invalidates the pending result and loses every document.
+        with WRITE_LOCK:
+            self._connection.begin()
+            try:
+                self._delete_many(chunk_ids)
+                self._insert_arrow("lexical_documents", documents)
+                self._insert_arrow("lexical_terms", postings)
+                self._connection.commit()
+            except Exception:
+                self._connection.rollback()
+                raise
+
+    def _insert_arrow(self, table: str, rows: list[tuple[str, str, int]]) -> None:
+        """Insert *rows* through Arrow rather than ``executemany``.
+
+        ``executemany`` binds each value individually, which costs ~470 us per
+        posting row; a corpus producing 168k postings spent 80 s here.  Handing
+        DuckDB three ready-made Arrow columns is the same data in one scan —
+        measured at 0.5 us per row, a thousandfold difference.
+        """
+        if not rows:
+            return
+
+        import pyarrow as pa
+
+        # Column names are arbitrary: INSERT ... SELECT * matches by position.
+        incoming = pa.table(
+            {
+                "id": pa.array([row[0] for row in rows]),
+                "text": pa.array([row[1] for row in rows]),
+                "count": pa.array([row[2] for row in rows], type=pa.int32()),
+            }
+        )
+        insert_arrow(
+            self._connection,
+            incoming,
+            f"INSERT INTO {table} SELECT * FROM {INCOMING}",  # noqa: S608
+        )
 
     def delete(self, chunk_id: str) -> None:
         """Remove one lexical document and its postings."""
