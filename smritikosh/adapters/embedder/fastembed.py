@@ -14,7 +14,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from smritikosh.constants import CODE_QUERY_INSTRUCTION, DEFAULT_MODEL
-from smritikosh.ports.embedder import Embedder
+from smritikosh.ports.embedder import Embedder, EmbeddingIdentity
 
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
@@ -34,6 +34,7 @@ _CODE_INSTRUCTION = CODE_QUERY_INSTRUCTION
 _MODEL_REPO = "mrsladoje/CodeRankEmbed-onnx-int8"
 _MODEL_DIM = 768
 _MODEL_FILE = "onnx/model.onnx"
+_VECTOR_SPACE = "coderank-onnx-int8-v1"
 
 
 class FastEmbedEmbedder(Embedder):
@@ -63,6 +64,18 @@ class FastEmbedEmbedder(Embedder):
     @property
     def model_id(self) -> str:
         return f"{self._model_name}:{self.dims}"
+
+    @property
+    def identity(self) -> EmbeddingIdentity:
+        return EmbeddingIdentity(
+            model=self._model_name,
+            vector_space=_VECTOR_SPACE,
+            dimensions=self.dims,
+        )
+
+    @property
+    def display_name(self) -> str:
+        return "CodeRankEmbed (portable CPU)"
 
     @property
     def max_tokens(self) -> int:

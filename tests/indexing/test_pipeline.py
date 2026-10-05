@@ -41,6 +41,15 @@ class _Embedder(Embedder):
         return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
 
 
+class _OtherEmbedder(_Embedder):
+    """Same width, different vector space and output."""
+
+    model_id = "other:4"
+
+    def encode_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.4, 0.3, 0.2, 0.1] for _ in texts]
+
+
 class _VectorStore:
     def __init__(self) -> None:
         self._store: dict[str, list[float]] = {}
@@ -483,6 +492,34 @@ def test_build_index_reports_every_file_to_the_callback(tmp_path: Path) -> None:
     )
 
     assert sorted(seen) == ["one.py", "two.py"]
+
+
+def test_build_index_reembeds_when_vector_space_changes_at_same_width(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "hello.py").write_text("def hello(): pass\n")
+    connection = duckdb.connect(":memory:")
+    storage = DuckDBAdapter(con=connection)
+    vector_store = DuckDBVectorStore(con=connection)
+
+    build_index(
+        str(tmp_path),
+        embedder=_Embedder(),
+        storage=storage,
+        vector_store=vector_store,
+    )
+    before = connection.execute("SELECT vector FROM vectors").fetchone()[0]
+
+    build_index(
+        str(tmp_path),
+        embedder=_OtherEmbedder(),
+        storage=storage,
+        vector_store=vector_store,
+    )
+    after = connection.execute("SELECT vector FROM vectors").fetchone()[0]
+
+    assert before != after
+    assert vector_store.get_stored_identity() == _OtherEmbedder().identity
 
 
 def test_build_index_refills_the_lexical_index_after_a_schema_change(

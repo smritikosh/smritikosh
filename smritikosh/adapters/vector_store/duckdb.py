@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterable, Sequence
+from dataclasses import asdict
 from typing import Final
 
 import duckdb
 
 from smritikosh.adapters._arrow import INCOMING, insert_arrow
 from smritikosh.constants import DEFAULT_DB_PATH
+from smritikosh.ports.embedder import EmbeddingIdentity
 from smritikosh.ports.vector_store import VectorStore
 
 __all__ = ["DuckDBVectorStore"]
@@ -17,6 +20,7 @@ __all__ = ["DuckDBVectorStore"]
 logger = logging.getLogger(__name__)
 
 DIMS_KEY: Final = "embedder_dims"
+IDENTITY_KEY: Final = "embedding_identity"
 INCREMENTAL_CACHES: Final = ("file_hashes", "memo_cache")
 
 
@@ -37,25 +41,30 @@ class DuckDBVectorStore(VectorStore):
         # Recover width from the file so a reopened store can search without setup().
         self._dims = self.get_stored_dims()
 
-    def setup(self, dims: int) -> None:
+    def setup(self, identity: EmbeddingIdentity) -> None:
         # dims is interpolated below -- DuckDB cannot bind an array width.
-        if dims <= 0:
-            raise ValueError(f"dims must be positive, got {dims}")
+        if identity.dimensions <= 0:
+            raise ValueError(f"dims must be positive, got {identity.dimensions}")
 
-        stored = self.get_stored_dims()
-        if stored != dims:
-            self._reset_for_new_model(stored, dims)
+        stored = self.get_stored_identity()
+        if stored != identity:
+            self._reset_for_new_model(stored, identity)
 
         self._con.execute(
             f"CREATE TABLE IF NOT EXISTS vectors ("  # noqa: S608
             f"chunk_id TEXT PRIMARY KEY, "
-            f"vector FLOAT[{dims}], "
+            f"vector FLOAT[{identity.dimensions}], "
             f"updated_at TIMESTAMP DEFAULT now())"
         )
         self._con.execute(
-            "INSERT OR REPLACE INTO kv_store VALUES (?, ?)", [DIMS_KEY, str(dims)]
+            "INSERT OR REPLACE INTO kv_store VALUES (?, ?)",
+            [DIMS_KEY, str(identity.dimensions)],
         )
-        self._dims = dims
+        self._con.execute(
+            "INSERT OR REPLACE INTO kv_store VALUES (?, ?)",
+            [IDENTITY_KEY, json.dumps(asdict(identity), sort_keys=True)],
+        )
+        self._dims = identity.dimensions
 
     def upsert(self, chunk_id: str, vector: list[float]) -> None:
         self.upsert_many([(chunk_id, vector)])
@@ -155,18 +164,30 @@ class DuckDBVectorStore(VectorStore):
         ).fetchone()
         return int(row[0]) if row else None
 
+    def get_stored_identity(self) -> EmbeddingIdentity | None:
+        row = self._con.execute(
+            "SELECT value FROM kv_store WHERE key = ?", [IDENTITY_KEY]
+        ).fetchone()
+        if row is None:
+            return None
+        return EmbeddingIdentity(**json.loads(row[0]))
+
     def close(self) -> None:
         if self._owns_con:
             self._con.close()
 
-    def _reset_for_new_model(self, stored: int | None, dims: int) -> None:
+    def _reset_for_new_model(
+        self,
+        stored: EmbeddingIdentity | None,
+        identity: EmbeddingIdentity,
+    ) -> None:
         # A different model makes every stored vector meaningless, and the
         # incremental caches would otherwise skip re-embedding the whole repo.
         if stored is not None:
             logger.warning(
-                "Embedding dims changed from %s to %s; dropping stored vectors",
-                stored,
-                dims,
+                "Embedding vector space changed from %s to %s; dropping stored vectors",
+                stored.vector_space,
+                identity.vector_space,
             )
 
         self._con.execute("DROP TABLE IF EXISTS vectors")

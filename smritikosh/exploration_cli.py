@@ -7,7 +7,7 @@ from dataclasses import asdict
 import click
 import toons
 
-from smritikosh.adapters.embedder import make_embedder
+from smritikosh.adapters.embedder import EmbedderUnavailableError, resolve_embedder
 from smritikosh.adapters.retrieval.duckdb import (
     DuckDBBm25Store,
     DuckDBDenseRetriever,
@@ -329,9 +329,18 @@ def hybrid_search(
     )[:MAX_QUERIES]
     if not queries:
         raise click.UsageError("Provide at least one non-empty QUERY")
-    embedder: Embedder = make_embedder()
     reader = DuckDBSourceReader(db_path)
     try:
+        identity = reader.embedding_identity()
+        if identity is None:
+            raise click.ClickException(
+                "This index predates embedding metadata. Rebuild it once with "
+                "`smritikosh index <repo_path>`."
+            )
+        try:
+            embedder: Embedder = resolve_embedder(identity)
+        except EmbedderUnavailableError as exc:
+            raise click.ClickException(str(exc)) from exc
         lexical_store = DuckDBBm25Store(db_path, read_only=True)
         try:
             service = HybridSearchService(

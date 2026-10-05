@@ -14,24 +14,18 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ### Added
 
-- An `mps` embedder that runs CodeRankEmbed on the Apple GPU through PyTorch, behind the
-  existing `Embedder` port and the new `smritikosh[mps]` extra. Measured on an M4 Max,
-  77 chunks/s against 12 for the default single ONNX session on the CPU. Opt in with
-  `--embedder mps` on `index` and `search`, or `SMRITIKOSH_EMBEDDER=mps` so every entry
-  point agrees. Apple silicon only and ~2.5 GB of wheels, so the CPU path stays the
-  default — and loading the checkpoint costs a few seconds per process, which a one-shot
-  `search` pays in full, so it earns its keep on indexing rather than on queries.
-
-  It runs the fp32 checkpoint while the ONNX path runs an INT8 export, and the two are not
-  interchangeable: measured cosine between their vectors is 0.87–0.90 and they rank
-  differently. `model_id` carries the backend, so an index has to be built and searched
-  with the same one.
+- Automatic Apple GPU acceleration for CodeRankEmbed. Indexing selects the best runtime
+  available on the machine, stores its vector-space identity, and search restores the
+  compatible runtime without exposing backend choices in the CLI.
 
 - `CODE_QUERY_INSTRUCTION` in `constants`, the required CodeRankEmbed query instruction.
   Both embedder adapters now read it from there rather than keeping their own copy, which
   could drift — a changed instruction silently invalidates every cached embedding.
 
 ### Changed
+
+- Apple-silicon installations include the PyTorch runtime through platform-marked
+  dependencies. Other platforms skip those packages and keep the portable ONNX runtime.
 
 - Vectors and lexical postings are written in one batch per file through Arrow rather
   than a row at a time. Binding a 768-float vector as a Python list made DuckDB convert
@@ -49,9 +43,9 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ### Fixed
 
-- The `mps` extra's requirements are marked Apple silicon only. uv solves every extra
-  for each `required-environments` entry, including Intel Macs, and `torch>=2.4` has no
-  `macosx_x86_64` wheel, so an unmarked extra made `uv sync` unsatisfiable.
+- Changing between equal-width embedding vector spaces now clears stale vectors and
+  incremental caches before rebuilding. Search and exploration reject legacy or
+  incompatible index metadata instead of silently comparing unrelated vectors.
 
 - `upsert_many` takes the vector width from the stored column rather than from the first
   item in the batch, and rejects a batch that is not uniformly that wide. Binding one

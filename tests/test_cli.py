@@ -2,7 +2,6 @@
 
 Coverage map
 ────────────
-_make_embedder          – constructs FastEmbedEmbedder with CodeRankEmbed
 _open_stores            – correct types, shared DuckDB connection
 index command           – happy path, --full ordering, --db-path passthrough,
                           --watch output, watch re-index progress callback,
@@ -22,8 +21,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from smritikosh.cli import _make_embedder, _open_stores, _watch_loop, main
+from smritikosh.cli import _open_stores, _watch_loop, main
 from smritikosh.models import SearchResult
+from smritikosh.ports.embedder import EmbeddingIdentity
 
 # ── Stubs ─────────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,8 @@ class _StubEmbedder:
 
     dims = 3
     model_id = "stub:3"
+    identity = EmbeddingIdentity("stub", "stub-v1", 3)
+    display_name = "Stub embeddings"
 
     def encode_documents(self, texts: list[str]) -> list[list[float]]:
         return [[0.1, 0.2, 0.3]] * len(texts)
@@ -63,7 +65,10 @@ def db_path(tmp_path: Path) -> str:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _mock_stores(dims: int | None = 3) -> tuple[MagicMock, MagicMock]:
+def _mock_stores(
+    dims: int | None = 3,
+    identity: EmbeddingIdentity | None = _StubEmbedder.identity,
+) -> tuple[MagicMock, MagicMock]:
     """Return a *(storage, vector_store)* MagicMock pair.
 
     *dims* is what ``vector_store.get_stored_dims()`` returns — ``None``
@@ -73,6 +78,7 @@ def _mock_stores(dims: int | None = 3) -> tuple[MagicMock, MagicMock]:
     storage.con = MagicMock()
     vector_store = MagicMock()
     vector_store.get_stored_dims.return_value = dims
+    vector_store.get_stored_identity.return_value = identity
     return storage, vector_store
 
 
@@ -93,25 +99,6 @@ def _result(
         score=score,
         chunk_kind=chunk_kind,
     )
-
-
-# ── _make_embedder ────────────────────────────────────────────────────────────
-
-
-def test_make_embedder_uses_coderankembed(monkeypatch: pytest.MonkeyPatch) -> None:
-    from smritikosh.adapters.embedder import EMBEDDER_ENV_VAR
-    from smritikosh.adapters.embedder.fastembed import FastEmbedEmbedder
-    from smritikosh.constants import DEFAULT_MODEL
-
-    # The factory falls back to the environment, so a developer with
-    # SMRITIKOSH_EMBEDDER set would otherwise get a different backend here.
-    monkeypatch.delenv(EMBEDDER_ENV_VAR, raising=False)
-
-    emb = _make_embedder()
-
-    assert isinstance(emb, FastEmbedEmbedder)
-    assert emb._model_name == DEFAULT_MODEL
-    assert emb._model_name == "nomic-ai/CodeRankEmbed"
 
 
 # ── _open_stores ──────────────────────────────────────────────────────────────
@@ -145,7 +132,7 @@ def test_index_exits_zero_and_prints_done(runner, repo, db_path) -> None:
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index"),
     ):
@@ -159,7 +146,7 @@ def test_index_full_announces_the_rebuild(runner, repo, db_path) -> None:
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index"),
     ):
@@ -178,7 +165,7 @@ def test_index_full_delegates_clearing_to_build_index(runner, repo, db_path) -> 
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index") as mock_build,
     ):
@@ -193,7 +180,7 @@ def test_index_without_full_does_not_request_a_rebuild(runner, repo, db_path) ->
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index") as mock_build,
     ):
@@ -207,7 +194,7 @@ def test_index_db_path_forwarded_to_open_stores(runner, repo, tmp_path: Path) ->
     custom_db = str(tmp_path / "custom.duckdb")
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch(
             "smritikosh.cli._open_stores", return_value=(storage, vector_store)
         ) as mock_open,
@@ -218,73 +205,63 @@ def test_index_db_path_forwarded_to_open_stores(runner, repo, tmp_path: Path) ->
     mock_open.assert_called_once_with(custom_db)
 
 
-def test_index_embedder_flag_selects_the_backend(runner, repo, db_path) -> None:
+def test_index_automatically_selects_an_embedder(runner, repo, db_path) -> None:
     storage, vector_store = _mock_stores()
 
     with (
         patch(
-            "smritikosh.cli._make_embedder", return_value=_StubEmbedder()
-        ) as mock_emb,
+            "smritikosh.cli.select_embedder", return_value=_StubEmbedder()
+        ) as mock_select,
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index"),
     ):
-        result = runner.invoke(
-            main, ["index", repo, "--db-path", db_path, "--embedder", "mps"]
-        )
+        result = runner.invoke(main, ["index", repo, "--db-path", db_path])
 
     assert result.exit_code == 0
-    mock_emb.assert_called_once_with("mps")
+    mock_select.assert_called_once_with()
 
 
-def test_index_without_embedder_flag_defers_to_the_factory(
-    runner, repo, db_path
-) -> None:
-    """None lets make_embedder read the env var, so every command agrees."""
-    storage, vector_store = _mock_stores()
-
-    with (
-        patch(
-            "smritikosh.cli._make_embedder", return_value=_StubEmbedder()
-        ) as mock_emb,
-        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.indexing.pipeline.build_index"),
-    ):
-        runner.invoke(main, ["index", repo, "--db-path", db_path])
-
-    mock_emb.assert_called_once_with(None)
-
-
-def test_index_rejects_an_unknown_embedder(runner, repo, db_path) -> None:
-    result = runner.invoke(
-        main, ["index", repo, "--db-path", db_path, "--embedder", "bert"]
-    )
-
-    assert result.exit_code != 0
-
-
-def test_search_embedder_flag_selects_the_backend(runner, db_path) -> None:
-    """A mismatched backend would silently compare across vector spaces."""
+def test_search_restores_backend_from_stored_identity(runner, db_path) -> None:
     storage, vector_store = _mock_stores()
     mock_idx = MagicMock()
     mock_idx.search = AsyncMock(return_value=[])
 
     with (
         patch(
-            "smritikosh.cli._make_embedder", return_value=_StubEmbedder()
-        ) as mock_emb,
+            "smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()
+        ) as mock_resolve,
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
-        runner.invoke(main, ["search", "q", "--db-path", db_path, "--embedder", "mps"])
+        runner.invoke(main, ["search", "q", "--db-path", db_path])
 
-    mock_emb.assert_called_once_with("mps")
+    mock_resolve.assert_called_once_with(_StubEmbedder.identity)
+
+
+def test_search_reports_when_stored_backend_is_unavailable(runner, db_path) -> None:
+    from smritikosh.adapters.embedder import EmbedderUnavailableError
+
+    storage, vector_store = _mock_stores()
+
+    with (
+        patch(
+            "smritikosh.cli.resolve_embedder",
+            side_effect=EmbedderUnavailableError("runtime unavailable"),
+        ),
+        patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
+    ):
+        result = runner.invoke(main, ["search", "q", "--db-path", db_path])
+
+    assert result.exit_code != 0
+    assert "runtime unavailable" in result.output
+    storage.close.assert_called_once()
 
 
 def test_index_storage_closed_on_success(runner, repo, db_path) -> None:
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index"),
     ):
@@ -298,7 +275,7 @@ def test_index_storage_closed_when_build_raises(runner, repo, db_path) -> None:
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch(
             "smritikosh.indexing.pipeline.build_index",
@@ -315,7 +292,7 @@ def test_index_watch_flag_prints_watching_message(runner, repo, db_path) -> None
     storage, vector_store = _mock_stores()
 
     with (
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.select_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
         patch("smritikosh.indexing.pipeline.build_index"),
         # Replace the infinite async loop with a no-op coroutine.
@@ -367,7 +344,7 @@ def test_search_prints_formatted_result(runner, db_path) -> None:
 
     with (
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
         result = runner.invoke(
@@ -388,7 +365,7 @@ def test_search_prints_no_results_message_when_index_is_empty(runner, db_path) -
 
     with (
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
         result = runner.invoke(main, ["search", "q", "--db-path", db_path])
@@ -409,6 +386,17 @@ def test_search_errors_when_nothing_indexed(runner, db_path) -> None:
     assert "smritikosh index" in result.output  # points user at the fix
 
 
+def test_search_requires_rebuild_for_legacy_index(runner, db_path) -> None:
+    storage, vector_store = _mock_stores(identity=None)
+
+    with patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)):
+        result = runner.invoke(main, ["search", "q", "--db-path", db_path])
+
+    assert result.exit_code != 0
+    assert "predates embedding metadata" in result.output
+    assert "smritikosh index" in result.output
+
+
 def test_search_storage_closed_on_success(runner, db_path) -> None:
     storage, vector_store = _mock_stores(dims=3)
     mock_idx = MagicMock()
@@ -416,7 +404,7 @@ def test_search_storage_closed_on_success(runner, db_path) -> None:
 
     with (
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
         runner.invoke(main, ["search", "q", "--db-path", db_path])
@@ -441,7 +429,7 @@ def test_search_top_k_forwarded_to_vector_index(runner, db_path) -> None:
 
     with (
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
         runner.invoke(main, ["search", "find me", "--top-k", "3", "--db-path", db_path])
@@ -458,7 +446,7 @@ def test_search_indents_every_line_of_multiline_snippet(runner, db_path) -> None
 
     with (
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
         result = runner.invoke(main, ["search", "q", "--db-path", db_path])
@@ -476,7 +464,7 @@ def test_search_omits_chunk_kind_brackets_when_kind_is_none(runner, db_path) -> 
 
     with (
         patch("smritikosh.cli._open_stores", return_value=(storage, vector_store)),
-        patch("smritikosh.cli._make_embedder", return_value=_StubEmbedder()),
+        patch("smritikosh.cli.resolve_embedder", return_value=_StubEmbedder()),
         patch("smritikosh.indexing.vector_index.VectorIndex", return_value=mock_idx),
     ):
         result = runner.invoke(main, ["search", "q", "--db-path", db_path])

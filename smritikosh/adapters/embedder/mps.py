@@ -1,23 +1,8 @@
-"""Apple GPU embedding backend — PyTorch on Metal (MPS), opt-in.
+"""Apple GPU embedding adapter using PyTorch on Metal.
 
-Same model as the default CPU adapter (:data:`DEFAULT_MODEL`, CodeRankEmbed),
-run through PyTorch's Metal backend instead of ONNX Runtime.  Measured on an
-M4 Max (16 CPU cores, 40 GPU cores): 77 chunks/s against 35 for eight parallel
-INT8 ONNX sessions, and 12 for a single one.
-
-Not the default, and deliberately so:
-
-* it only exists on Apple silicon, while the ONNX path runs anywhere;
-* it pulls in PyTorch (~2.5 GB), which the base install avoids on purpose;
-* loading the checkpoint costs a few seconds per process, which a one-shot
-  ``search`` pays in full — it earns its keep on a long indexing run.
-
-Install with ``pip install 'smritikosh[mps]'``.
-
-This runs the fp32 checkpoint, whereas the ONNX path runs an INT8 export.
-The two are *not* interchangeable: measured cosine between their vectors is
-0.87-0.90 and they rank differently, so an index must be built and searched
-with the same backend.  ``model_id`` carries the backend for that reason.
+This adapter runs the fp32 CodeRankEmbed checkpoint. Its vectors are not
+compatible with the portable adapter's quantized ONNX vectors, so each adapter
+declares a distinct vector-space identity.
 """
 
 from __future__ import annotations
@@ -27,7 +12,7 @@ import threading
 from typing import TYPE_CHECKING
 
 from smritikosh.constants import CODE_QUERY_INSTRUCTION, DEFAULT_MODEL
-from smritikosh.ports.embedder import Embedder
+from smritikosh.ports.embedder import Embedder, EmbeddingIdentity
 
 if TYPE_CHECKING:
     from sentence_transformers import SentenceTransformer
@@ -37,6 +22,7 @@ __all__ = ["MpsEmbedder"]
 logger = logging.getLogger(__name__)
 
 _MODEL_DIM = 768
+_VECTOR_SPACE = "coderank-pytorch-fp32-v1"
 
 #: Token window applied to the PyTorch checkpoint.  The model card advertises
 #: 8192, and unlike the INT8 ONNX export nothing here forces 512 — but the
@@ -51,8 +37,8 @@ _MAX_SEQ_LENGTH = 512
 _BATCH_SIZE = 16
 
 _INSTALL_HINT = (
-    "The mps embedder needs PyTorch and sentence-transformers. "
-    "Install them with: pip install 'smritikosh[mps]'"
+    "Apple GPU acceleration needs PyTorch and sentence-transformers. "
+    "Reinstall smritikosh to restore its platform dependencies."
 )
 
 
@@ -98,6 +84,18 @@ class MpsEmbedder(Embedder):
     def model_id(self) -> str:
         """Identity including the backend — fp32 and INT8 are different spaces."""
         return f"{self._model_name}:mps:{self.dims}"
+
+    @property
+    def identity(self) -> EmbeddingIdentity:
+        return EmbeddingIdentity(
+            model=self._model_name,
+            vector_space=_VECTOR_SPACE,
+            dimensions=self.dims,
+        )
+
+    @property
+    def display_name(self) -> str:
+        return "CodeRankEmbed (Apple GPU accelerated)"
 
     @property
     def max_tokens(self) -> int:
