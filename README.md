@@ -58,6 +58,10 @@ smritikosh explore chunks --range src/auth/policy.py 176 193
 Re-run `index` anytime: unchanged files are skipped, so only the Δ costs anything.
 Add `--watch` to keep it live while you work.
 
+On Apple silicon, Smritikosh automatically uses the GPU; elsewhere it uses its portable
+CPU runtime. The index remembers its vector format, so search always restores the compatible
+runtime without another option.
+
 ## Retrieval: _evidence you can point at_
 
 <img src="https://raw.githubusercontent.com/smritikosh/smritikosh/main/assets/hybrid-retrieval-light.svg" alt="An agent asks one plain question, why can't users log in, and Smritikosh turns it into four angles: where login is decided, what it checks, where it says no, and the tests that cover it. Each angle runs down three retrieval channels: semantic recall over dense vectors, lexical precision over BM25, and a call-graph channel that is not yet implemented. The rankings are combined by Reciprocal Rank Fusion, Facet Reservation, and Maximal Marginal Relevance, and what survives comes back as a short list of exact line ranges such as auth/policy.py 176-193: whole definitions plus one hop further, with line numbers that stay true." width="100%" draggable="false">
@@ -106,7 +110,7 @@ today.
 | **Source** | Local filesystem, `.gitignore`-aware | Slack, Google Drive, S3, Confluence, meeting notes |
 | **Structure** | Python, TypeScript, JavaScript, Java, Kotlin, Markdown, MDX, JSON, TOML | Go, Rust, C#; transcripts by speaker turn, tickets by field |
 | **Store** | DuckDB, one local file | Postgres with pgvector, Qdrant, Neo4j |
-| **Embedder** | FastEmbed on local ONNX, no API key | OpenAI, Voyage, or any hosted model |
+| **Embedder** | CodeRankEmbed, automatically accelerated on Apple silicon | OpenAI, Voyage, or any hosted model |
 | **Retrieval** | Dense vectors and BM25 | Call graph: callers and callees |
 
 ## How it works

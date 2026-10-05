@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING
 
 import click
 
+from smritikosh.adapters.embedder import (
+    EmbedderUnavailableError,
+    resolve_embedder,
+    select_embedder,
+)
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.exploration_cli import explore
 
@@ -17,16 +22,6 @@ if TYPE_CHECKING:
     from smritikosh.ports.embedder import Embedder
     from smritikosh.ports.storage import StorageAdapter
     from smritikosh.ports.vector_store import VectorStore
-
-
-# ── Embedder factory ──────────────────────────────────────────────────────────
-
-
-def _make_embedder() -> Embedder:
-    """Thin Click wrapper around :func:`smritikosh.adapters.embedder.make_embedder`."""
-    from smritikosh.adapters.embedder import make_embedder
-
-    return make_embedder()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -165,7 +160,11 @@ def index(
     """Build or incrementally update the vector index for REPO_PATH."""
     from smritikosh.indexing.pipeline import count_source_files
 
-    emb = _make_embedder()
+    try:
+        emb = select_embedder()
+    except EmbedderUnavailableError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     storage, vector_store = _open_stores(db_path)
     try:
         if full:
@@ -173,6 +172,7 @@ def index(
 
         n_files = count_source_files(repo_path)
         click.echo(f"Indexing {repo_path!r} — {n_files} source file(s) …")
+        click.echo(f"Embedding: {emb.display_name}")
 
         t0 = time.perf_counter()
         _build_index_with_progress(
@@ -226,12 +226,22 @@ def search(
     results = []  # populated inside try; display happens after storage is closed
     t0 = time.perf_counter()
     try:
-        if vector_store.get_stored_dims() is None:
+        stored_dims = vector_store.get_stored_dims()
+        identity = vector_store.get_stored_identity()
+        if stored_dims is None:
             raise click.ClickException(
                 f"No index found at {db_path!r}. "
                 "Run `smritikosh index <repo_path>` first."
             )
-        emb = _make_embedder()
+        if identity is None:
+            raise click.ClickException(
+                "This index predates embedding metadata. Rebuild it once with "
+                "`smritikosh index <repo_path>`."
+            )
+        try:
+            emb = resolve_embedder(identity)
+        except EmbedderUnavailableError as exc:
+            raise click.ClickException(str(exc)) from exc
         idx = VectorIndex(vector_store, storage, emb)
         results = asyncio.run(idx.search(query, top_k))
     finally:

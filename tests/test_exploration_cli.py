@@ -182,7 +182,7 @@ def test_should_label_facets_by_query_id_in_two_compact_tables(
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         output = _run_search(
             db_path,
@@ -233,7 +233,7 @@ def test_should_omit_source_coverage_and_truncation_metadata(tmp_path: Path) -> 
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         output = _run_search(db_path, "upload flow")
 
@@ -266,7 +266,7 @@ def test_should_return_ranges_that_chunks_can_read_directly(tmp_path: Path) -> N
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         search_output = _run_search(db_path, "retry")
     row = toons.loads(search_output)["search_results"][0]
@@ -314,7 +314,7 @@ def test_should_clamp_search_limits_instead_of_failing(tmp_path: Path) -> None:
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         _run_search(db_path, "query", "--max-results", "48")
 
@@ -338,7 +338,7 @@ def test_should_bound_the_number_and_length_of_accepted_queries(
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         _run_search(db_path, *[f"query {index}" for index in range(10)], "x" * 900)
 
@@ -362,7 +362,7 @@ def test_should_collapse_repeated_queries_before_retrieving(tmp_path: Path) -> N
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         output = _run_search(db_path, "upload flow", "upload flow", " upload flow ")
 
@@ -437,14 +437,14 @@ def test_should_fuse_dense_and_lexical_channels_for_every_query(
             return_value=lexical_store,
         ),
         patch(
-            "smritikosh.exploration_cli.make_embedder",
+            "smritikosh.exploration_cli.resolve_embedder",
             return_value=embedder,
         ) as embedder_factory,
     ):
         output = _run_search(db_path, "publication flow", "publication tests")
 
     # Assert
-    embedder_factory.assert_called_once_with()
+    embedder_factory.assert_called_once_with(explorer.embedding_identity.return_value)
     assert explorer.semantic_search.call_count == 2
     assert explorer.semantic_search.call_args_list[1].args[0] == ["publication tests"]
     assert lexical_store.search.call_count == 2
@@ -491,7 +491,7 @@ def test_should_expand_search_window_to_complete_definition(tmp_path: Path) -> N
             return_value=lexical_store,
         ),
         patch(
-            "smritikosh.exploration_cli.make_embedder",
+            "smritikosh.exploration_cli.resolve_embedder",
             return_value=MagicMock(),
         ),
     ):
@@ -561,7 +561,7 @@ def test_should_prefer_relevant_source_over_higher_scoring_documentation(
             return_value=lexical_store,
         ),
         patch(
-            "smritikosh.exploration_cli.make_embedder",
+            "smritikosh.exploration_cli.resolve_embedder",
             return_value=MagicMock(),
         ),
     ):
@@ -590,7 +590,7 @@ def test_should_print_query_legend_and_locations_as_prose(tmp_path: Path) -> Non
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         output = _run_search(db_path, "upload flow", "--prose")
 
@@ -617,7 +617,7 @@ def test_should_close_reader_when_bm25_store_construction_fails(
             side_effect=RuntimeError("cannot open BM25"),
         ),
         patch(
-            "smritikosh.exploration_cli.make_embedder",
+            "smritikosh.exploration_cli.resolve_embedder",
             return_value=MagicMock(),
         ),
     ):
@@ -647,7 +647,7 @@ def test_should_report_a_missing_bm25_index_as_a_command_error(
         ),
         patch("smritikosh.exploration_cli.DuckDBBm25Store", return_value=MagicMock()),
         patch("smritikosh.exploration_cli.HybridSearchService", return_value=service),
-        patch("smritikosh.exploration_cli.make_embedder", return_value=MagicMock()),
+        patch("smritikosh.exploration_cli.resolve_embedder", return_value=MagicMock()),
     ):
         result = CliRunner().invoke(
             main,

@@ -240,7 +240,7 @@ def build_index(
 
         lexical_store = DuckDBBm25Store(DEFAULT_DB_PATH, con=_con)
 
-    vector_store.setup(embedder.dims)
+    vector_store.setup(embedder.identity)
     lexical_schema_changed: bool = lexical_store.setup()
 
     if _con is not None:

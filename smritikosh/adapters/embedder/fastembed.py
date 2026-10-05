@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from smritikosh.constants import DEFAULT_MODEL
-from smritikosh.ports.embedder import Embedder
+from smritikosh.constants import CODE_QUERY_INSTRUCTION, DEFAULT_MODEL
+from smritikosh.ports.embedder import Embedder, EmbeddingIdentity
 
 if TYPE_CHECKING:
     from fastembed import TextEmbedding
@@ -23,9 +23,9 @@ __all__ = ["FastEmbedEmbedder"]
 
 logger = logging.getLogger(__name__)
 
-#: CodeRankEmbed's own instruction.  Its model card marks this as *required*:
-#: without it the query lands in document space and retrieval degrades badly.
-_CODE_INSTRUCTION = "Represent this query for searching relevant code: "
+#: CodeRankEmbed's own required query instruction.  Lives in constants because
+#: the MPS adapter serves the same model and the two must not drift.
+_CODE_INSTRUCTION = CODE_QUERY_INSTRUCTION
 
 # INT8 build chosen over FP32 (139 MB vs 548 MB) using the `reduce_range=True`
 # export — naive INT8 produces degenerate embeddings on pre-VNNI x86 CPUs.
@@ -34,6 +34,7 @@ _CODE_INSTRUCTION = "Represent this query for searching relevant code: "
 _MODEL_REPO = "mrsladoje/CodeRankEmbed-onnx-int8"
 _MODEL_DIM = 768
 _MODEL_FILE = "onnx/model.onnx"
+_VECTOR_SPACE = "coderank-onnx-int8-v1"
 
 
 class FastEmbedEmbedder(Embedder):
@@ -63,6 +64,18 @@ class FastEmbedEmbedder(Embedder):
     @property
     def model_id(self) -> str:
         return f"{self._model_name}:{self.dims}"
+
+    @property
+    def identity(self) -> EmbeddingIdentity:
+        return EmbeddingIdentity(
+            model=self._model_name,
+            vector_space=_VECTOR_SPACE,
+            dimensions=self.dims,
+        )
+
+    @property
+    def display_name(self) -> str:
+        return "CodeRankEmbed (portable CPU)"
 
     @property
     def max_tokens(self) -> int:

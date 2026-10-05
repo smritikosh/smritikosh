@@ -12,7 +12,20 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Added
+
+- Automatic Apple GPU acceleration for CodeRankEmbed. Indexing selects the best runtime
+  available on the machine, stores its vector-space identity, and search restores the
+  compatible runtime without exposing backend choices in the CLI.
+
+- `CODE_QUERY_INSTRUCTION` in `constants`, the required CodeRankEmbed query instruction.
+  Both embedder adapters now read it from there rather than keeping their own copy, which
+  could drift — a changed instruction silently invalidates every cached embedding.
+
 ### Changed
+
+- Apple-silicon installations include the PyTorch runtime through platform-marked
+  dependencies. Other platforms skip those packages and keep the portable ONNX runtime.
 
 - Vectors and lexical postings are written in one batch per file through Arrow rather
   than a row at a time. Binding a 768-float vector as a Python list made DuckDB convert
@@ -29,6 +42,10 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   leaving `process_file` to write a whole file's worth at once.
 
 ### Fixed
+
+- Changing between equal-width embedding vector spaces now clears stale vectors and
+  incremental caches before rebuilding. Search and exploration reject legacy or
+  incompatible index metadata instead of silently comparing unrelated vectors.
 
 - `upsert_many` takes the vector width from the stored column rather than from the first
   item in the batch, and rejects a batch that is not uniformly that wide. Binding one

@@ -16,6 +16,7 @@ from smritikosh.adapters._arrow import INCOMING, WRITE_LOCK, insert_arrow
 from smritikosh.adapters.retrieval.duckdb import DuckDBBm25Store
 from smritikosh.adapters.vector_store.duckdb import DuckDBVectorStore
 from smritikosh.models import Chunk
+from smritikosh.ports.embedder import EmbeddingIdentity
 
 X_AXIS = [1.0, 0.0, 0.0, 0.0]
 Y_AXIS = [0.0, 1.0, 0.0, 0.0]
@@ -132,7 +133,7 @@ def test_vector_store_should_hold_the_lock_for_its_write() -> None:
     pytest.importorskip("pyarrow")
     connection = duckdb.connect(":memory:")
     store = DuckDBVectorStore(con=connection)
-    store.setup(4)
+    store.setup(EmbeddingIdentity("test", "test-v1", 4))
     held: list[bool] = []
 
     store._con = _recording_connection(connection, "execute", held)
@@ -170,11 +171,12 @@ _CONCURRENT_WRITERS = """
     import duckdb
 
     from smritikosh.adapters.vector_store.duckdb import DuckDBVectorStore
+    from smritikosh.ports.embedder import EmbeddingIdentity
 
     N = 60
     connection = duckdb.connect(":memory:")
     store = DuckDBVectorStore(con=connection)
-    store.setup(4)
+    store.setup(EmbeddingIdentity("test", "test-v1", 4))
 
     def write(tag):
         for i in range(N):
