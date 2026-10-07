@@ -12,6 +12,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Added
 
 - Automatic Apple GPU acceleration for CodeRankEmbed. Indexing selects the best runtime
@@ -122,6 +124,7 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   chunk of a section carries that section's heading as its symbol, and deduplication keyed
   on the symbol, so a long section returned only its first chunk however many matched.
 
-[Unreleased]: https://github.com/smritikosh/smritikosh/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/smritikosh/smritikosh/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/smritikosh/smritikosh/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/smritikosh/smritikosh/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/smritikosh/smritikosh/releases/tag/v0.1.0
