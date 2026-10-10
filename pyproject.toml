@@ -55,7 +55,7 @@ dependencies = [
     # Apple silicon installs its accelerated runtime automatically. Other
     # platforms skip these dependencies and use the portable ONNX adapter.
     "torch>=2.4 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
-    "transformers>=4.40,<5 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "transformers>=4.40,<6 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sentence-transformers>=3.0 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "einops>=0.7 ; sys_platform == 'darwin' and platform_machine == 'arm64'",
 ]
