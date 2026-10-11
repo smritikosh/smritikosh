@@ -1,4 +1,4 @@
-"""Section-based chunking for document files (Markdown, JSON)."""
+"""Section-based chunking for document files (Markdown, JSON, YAML)."""
 
 from __future__ import annotations
 
@@ -27,10 +27,13 @@ _JSON_DEPTHS: Final[tuple[str, ...]] = (
     "definition.subsubsection",
 )
 
-#: Comment marker for the key-path line prepended to a JSON chunk.  JSON has no
-#: comment syntax, so this is a label for the reader and the embedder rather
-#: than something that would round-trip through a parser.
-_PATH_MARKER: Final[str] = "// "
+#: Comment marker for the key-path line prepended to a structured chunk.
+#: JSON has no comment syntax, so ``//`` is a label rather than a comment.
+#: YAML uses ``#``, which is a real comment and stays out of the mapping.
+_PATH_MARKERS: Final[dict[str, str]] = {"json": "// ", "yaml": "# "}
+
+#: Languages whose tags query emits the three depths in :data:`_JSON_DEPTHS`.
+_STRUCTURED_LANGUAGES: Final[frozenset[str]] = frozenset({"json", "yaml"})
 
 _MARKDOWN_SECTION_CAPTURE: Final[str] = "definition.section"
 _MARKDOWN_BREAK_FLOOR: Final[float] = 0.55
@@ -626,6 +629,83 @@ def _merge_runs(
     return runs
 
 
+def _document_span(node: TreeSitterNode) -> tuple[int, int] | None:
+    """Return the byte range of the YAML document that contains *node*."""
+    current = node
+    while current is not None:
+        if getattr(current, "type", None) == "document":
+            return current.start_byte, current.end_byte
+        current = getattr(current, "parent", None)
+    return None
+
+
+def _pair_scalar(content: str, node: TreeSitterNode) -> str:
+    """Return the scalar after the first colon of a ``key: value`` pair."""
+    text = content.encode()[node.start_byte : node.end_byte].decode()
+    value = text.split(":", 1)[1].strip() if ":" in text else ""
+    value = value.splitlines()[0].strip() if value else ""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        value = value[1:-1]
+    return value.split()[0] if value else ""
+
+
+def _yaml_resource(content: str, captures: list[Capture], node: TreeSitterNode) -> str:
+    """Return ``Kind/name`` for the document that contains *node*.
+
+    ``kind`` is a top-level key. ``name`` is the ``name`` key inside that
+    document's ``metadata`` block, so a nested ``spec`` name is not picked up.
+    An empty string means the document has no such keys, or the node is a test
+    double with no parent chain.
+    """
+    span = _document_span(node)
+    if span is None:
+        return ""
+    start, end = span
+
+    def inside(cap: Capture) -> bool:
+        return start <= cap.node.start_byte and cap.node.end_byte <= end
+
+    kind = ""
+    for cap in captures:
+        if (
+            cap.capture_name == "definition.section"
+            and cap.name == "kind"
+            and inside(cap)
+        ):
+            kind = _pair_scalar(content, cap.node)
+            break
+
+    resource_name = ""
+    for cap in captures:
+        if (
+            cap.capture_name != "definition.section"
+            or cap.name != "metadata"
+            or not inside(cap)
+        ):
+            continue
+        for child in captures:
+            if (
+                child.capture_name == "definition.subsection"
+                and child.name == "name"
+                and cap.node.start_byte <= child.node.start_byte
+                and child.node.end_byte <= cap.node.end_byte
+            ):
+                resource_name = _pair_scalar(content, child.node)
+                break
+        break
+
+    if kind and resource_name:
+        return f"{kind}/{resource_name}"
+    return kind
+
+
+def _chunk_heading(path: str, resource: str) -> str:
+    """Label stored on a structured chunk, without its comment marker."""
+    if resource:
+        return f"{resource} {path}".strip()
+    return path
+
+
 class SectionChunkingStrategy:
     """One chunk per section capture, sized to the embedder's window.
 
@@ -633,7 +713,7 @@ class SectionChunkingStrategy:
     its active heading hierarchy as a breadcrumb, and oversized prose splits at
     paragraph, line, sentence, or word boundaries in that order.
 
-    JSON is different, in three ways:
+    JSON and YAML share three behaviours:
 
     * **Depth by size.** The query captures three nesting levels and selection
       takes the shallowest that *fits* (:func:`_select_by_size`), so chunks
@@ -641,12 +721,13 @@ class SectionChunkingStrategy:
     * **Runs.** Adjacent undersized siblings merge into one chunk
       (:func:`_merge_runs`), labelled ``parent.a+b`` — a config of one-line
       keys would otherwise become chunks too small to retrieve.
-    * **Key paths.** Each JSON chunk is prefixed with its dotted path, because
-      a mid-file JSON fragment is otherwise unidentifiable to a reader and to
-      the embedder alike.  The prefix is part of ``text``, so it is both
-      embedded and shown as the search snippet; ``start_line`` still points at
-      the captured value, so the printed range covers one line fewer than the
-      printed snippet.
+    * **Key paths.** Each chunk is prefixed with its dotted path, because a
+      mid-file fragment is otherwise unidentifiable to a reader and to the
+      embedder alike.  The prefix is part of ``text``, so it is both embedded
+      and shown as the search snippet; ``start_line`` still points at the
+      captured value, so the printed range covers one line fewer than the
+      printed snippet.  YAML leads that prefix with ``Kind/name`` when the
+      document has a top-level ``kind`` and a ``metadata.name``.
     """
 
     mode_name = "section"
@@ -683,12 +764,12 @@ class SectionChunkingStrategy:
                 self.max_chars,
             )
 
-        label = parsed.language == "json"
+        structured = parsed.language in _STRUCTURED_LANGUAGES
         raw = parsed.content.encode()
-        selected = _select_by_size(captures, self.max_chars if label else None)
+        selected = _select_by_size(captures, self.max_chars if structured else None)
         groups = (
             _merge_runs(selected, self.max_chars)
-            if label
+            if structured
             else [[pair] for pair in selected]
         )
         chunks: list[Chunk] = []
@@ -699,7 +780,7 @@ class SectionChunkingStrategy:
             # between merged siblings (commas, newlines) travels with them.
             body = raw[cap.node.start_byte : last_node.end_byte].decode()
             first_line = cap.node.start_point[0] + 1
-            path = _run_path(run) if label else ""
+            path = _run_path(run) if structured else ""
             if not path:
                 chunks.extend(
                     make_text_chunks(
@@ -714,11 +795,17 @@ class SectionChunkingStrategy:
                 )
                 continue
 
+            resource = (
+                _yaml_resource(parsed.content, captures, cap.node)
+                if parsed.language == "yaml"
+                else ""
+            )
+            heading = _chunk_heading(path, resource)
             # Split the body first, then label each window.  Prefixing before
             # the split would make the prefix its own line, so the splitter
             # could peel it off into a 4-char chunk and leave the body
             # unlabelled — the exact degenerate fragment this work removes.
-            prefix = f"{_PATH_MARKER}{path}\n"
+            prefix = f"{_PATH_MARKERS[parsed.language]}{heading}\n"
             budget = (
                 None if self.max_chars is None else max(self.max_chars - len(prefix), 1)
             )
@@ -733,7 +820,7 @@ class SectionChunkingStrategy:
                         "section",
                         first_line + first,
                         first_line + last,
-                        path,
+                        heading,
                     )
                 )
         return chunks

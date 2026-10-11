@@ -16,6 +16,10 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ### Added
 
+- `.yaml` and `.yml` files are indexed. A manifest is split on its keys, and a
+  Kubernetes document is labelled `Kind/name` when `kind` and `metadata.name`
+  are present.
+
 - Automatic Apple GPU acceleration for CodeRankEmbed. Indexing selects the best runtime
   available on the machine, stores its vector-space identity, and search restores the
   compatible runtime without exposing backend choices in the CLI.

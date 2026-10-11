@@ -19,6 +19,7 @@ LANGUAGES = [
     "javascript",
     "markdown",
     "json",
+    "yaml",
 ]
 
 
@@ -303,6 +304,45 @@ def test_should_capture_json_keys_at_three_depths() -> None:
     assert {n.text.decode() for n in captures["definition.subsection"]} == {
         '"inner": 1'
     }
+
+
+YAML = """\
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: trig-stmt-gen
+spec:
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+"""
+
+
+def test_should_capture_yaml_keys_at_three_depths() -> None:
+    """Top-level keys, the keys under them, and one level further.
+
+    A short manifest still emits the deeper names. The section strategy
+    decides which depth becomes a chunk.
+    """
+    lang = get_language("yaml")
+    root = Parser(lang).parse(YAML.encode("utf-8")).root_node
+    captures = QueryCursor(Query(lang, _query_text("yaml"))).captures(root)
+
+    sections = {
+        node.text.decode().rstrip("\n") for node in captures["definition.section"]
+    }
+    assert sections == {
+        "apiVersion: batch/v1",
+        "kind: CronJob",
+        "metadata:\n  name: trig-stmt-gen",
+        "spec:\n  jobTemplate:\n    spec:\n      backoffLimit: 2",
+    }
+    assert "name: trig-stmt-gen" in {
+        node.text.decode() for node in captures["definition.subsection"]
+    }
+    assert any(
+        b"backoffLimit" in node.text for node in captures["definition.subsubsection"]
+    )
 
 
 def test_should_anchor_the_json_capture_on_the_pair_not_the_key() -> None:
