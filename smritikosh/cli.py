@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.metadata
 import time
 from typing import TYPE_CHECKING
 
@@ -121,6 +122,10 @@ async def _watch_loop(
 
 
 @click.group()
+@click.version_option(
+    version=importlib.metadata.version("smritikosh"),
+    prog_name="smritikosh",
+)
 def main() -> None:
     """smritikosh -- semantic vector search over a codebase."""
 
