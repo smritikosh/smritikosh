@@ -6,6 +6,7 @@ Adding a new language is one register_extension() call here.
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable
 
 from smritikosh.indexing.file_router import FileRouter, JsonExcludeFilter
 from smritikosh.indexing.strategies import (
@@ -16,7 +17,11 @@ from smritikosh.indexing.strategies import (
 
 
 @functools.cache
-def _build_router(max_chars: int | None = None) -> FileRouter:
+def _build_router(
+    max_chars: int | None = None,
+    max_tokens: int | None = None,
+    token_counter: Callable[[str], int] | None = None,
+) -> FileRouter:
     """Return a FileRouter pre-configured for all supported file types.
 
     Cached on *max_chars*: strategies and router are constructed once per
@@ -25,7 +30,7 @@ def _build_router(max_chars: int | None = None) -> FileRouter:
     actually encode; ``None`` leaves chunks uncapped.
     """
     ast = AstChunkingStrategy(max_chars)
-    sections = SectionChunkingStrategy(max_chars)
+    sections = SectionChunkingStrategy(max_chars, max_tokens, token_counter)
     toml = RegexChunkingStrategy(r"^\[+[^\]]+\]", max_chars)
 
     router = FileRouter(json_exclude_filter=JsonExcludeFilter())

@@ -36,6 +36,15 @@ def test_model_id_contains_model_name_and_dims(embedder: FastEmbedEmbedder) -> N
     assert str(embedder.dims) in embedder.model_id
 
 
+def test_count_tokens_uses_the_embedding_model_tokenizer(
+    embedder: FastEmbedEmbedder,
+) -> None:
+    text = "A punctuation-dense inventory: `P13_ALL0300`, `score_v2`."
+    expected = len(embedder._load().model.tokenizer.encode(text).ids)
+
+    assert embedder.count_tokens(text) == expected
+
+
 def test_encode_documents_returns_list_of_float_lists(
     embedder: FastEmbedEmbedder,
 ) -> None:

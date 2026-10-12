@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from smritikosh.ports.embedder import EmbeddingIdentity
 from smritikosh.ports.vector_store import VectorStore
 
 
@@ -11,7 +12,7 @@ class _MinimalStore(VectorStore):
     def __init__(self) -> None:
         self.vectors: dict[str, list[float]] = {}
 
-    def setup(self, dims: int) -> None: ...
+    def setup(self, identity: EmbeddingIdentity) -> None: ...
 
     def upsert(self, chunk_id: str, vector: list[float]) -> None:
         self.vectors[chunk_id] = vector
@@ -29,6 +30,9 @@ class _MinimalStore(VectorStore):
         return chunk_id in self.vectors
 
     def get_stored_dims(self) -> int | None:
+        return None
+
+    def get_stored_identity(self) -> EmbeddingIdentity | None:
         return None
 
 

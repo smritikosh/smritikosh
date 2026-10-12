@@ -38,8 +38,7 @@ _SAFETY_FACTOR = 0.9
 #: ``"descriptor": "chapter"`` (23 chars) outranks whole functions.  Measured on
 #: the reference corpus, merging such a fragment with its siblings *raised* its
 #: own score (0.652 -> 0.745) — a floor makes chunks more informative, it does
-#: not merely suppress noise.  CocoIndex encodes the same preference as an
-#: enormous TOO_SMALL_CHUNK_COST in its boundary cost model.
+#: not merely suppress noise.
 _MIN_CHUNK_CHARS = 80
 
 

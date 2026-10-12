@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+
+from smritikosh.ports.embedder import EmbeddingIdentity
 
 __all__ = ["VectorStore"]
 
@@ -12,11 +14,22 @@ class VectorStore(ABC):
     """Stores one vector per chunk and ranks them against a query vector."""
 
     @abstractmethod
-    def setup(self, dims: int) -> None:
-        """Prepare storage for vectors of width dims, rebuilding if dims changed."""
+    def setup(self, identity: EmbeddingIdentity) -> None:
+        """Prepare storage, rebuilding when the vector space changes."""
 
     @abstractmethod
     def upsert(self, chunk_id: str, vector: list[float]) -> None: ...
+
+    def upsert_many(self, items: Sequence[tuple[str, list[float]]]) -> None:
+        """Store several vectors at once.
+
+        Defaults to one :meth:`upsert` per item.  Override wherever writing a
+        vector row-by-row is expensive — on DuckDB the per-row parameter bind
+        walks every float, so this is the difference between 30 ms and 0.5 ms
+        per vector.
+        """
+        for chunk_id, vector in items:
+            self.upsert(chunk_id, vector)
 
     @abstractmethod
     def search(self, query_vector: list[float], top_k: int) -> list[tuple[str, float]]:
@@ -44,3 +57,7 @@ class VectorStore(ABC):
     @abstractmethod
     def get_stored_dims(self) -> int | None:
         """Width the store was last set up with, or None if never set up."""
+
+    @abstractmethod
+    def get_stored_identity(self) -> EmbeddingIdentity | None:
+        """Return the vector-space identity stored with the index."""

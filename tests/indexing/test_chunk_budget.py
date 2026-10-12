@@ -257,3 +257,23 @@ def test_no_chunk_should_truncate_under_the_real_tokenizer() -> None:
             f"{chunk.path}:{chunk.start_line} needs {n} tokens, "
             f"window is {max_tokens} — its tail would be dropped"
         )
+
+    inventory = ", ".join(f"`P13_ALL{i:04}`" for i in range(300))
+    markdown = f"# Attribute inventory\n\n{inventory}\n"
+    markdown_parsed = parsed(markdown, "inventory.md", language="markdown")
+    markdown_chunks = SectionChunkingStrategy(budget_chars(max_tokens)).chunk(
+        markdown_parsed,
+        [
+            cap(
+                "definition.section",
+                node_for(markdown, "# Attribute inventory"),
+                key="Attribute inventory",
+            )
+        ],
+    )
+    for chunk in markdown_chunks:
+        n = len(tokenizer.encode(chunk.text).ids)
+        assert n <= max_tokens, (
+            f"{chunk.path}:{chunk.start_line} needs {n} tokens, "
+            f"window is {max_tokens} — its tail would be dropped"
+        )

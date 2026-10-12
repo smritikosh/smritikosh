@@ -8,6 +8,11 @@ from typing import TYPE_CHECKING
 
 import click
 
+from smritikosh.adapters.embedder import (
+    EmbedderUnavailableError,
+    resolve_embedder,
+    select_embedder,
+)
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.exploration_cli import explore
 
@@ -17,16 +22,6 @@ if TYPE_CHECKING:
     from smritikosh.ports.embedder import Embedder
     from smritikosh.ports.storage import StorageAdapter
     from smritikosh.ports.vector_store import VectorStore
-
-
-# ── Embedder factory ──────────────────────────────────────────────────────────
-
-
-def _make_embedder() -> Embedder:
-    """Thin Click wrapper around :func:`smritikosh.adapters.embedder.make_embedder`."""
-    from smritikosh.adapters.embedder import make_embedder
-
-    return make_embedder()
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -44,6 +39,48 @@ def _open_stores(db_path: str) -> tuple[DuckDBAdapter, DuckDBVectorStore]:
     storage = DuckDBAdapter(db_path)
     vector_store = DuckDBVectorStore(db_path, con=storage.con)
     return storage, vector_store
+
+
+def _build_index_with_progress(
+    repo_path: str,
+    embedder: Embedder,
+    storage: StorageAdapter,
+    vector_store: VectorStore,
+    *,
+    n_files: int | None = None,
+    full: bool = False,
+) -> None:
+    """Run :func:`build_index` with a Click progress bar driven by ``on_file_indexed``.
+
+    *n_files* is the bar length.  When omitted it is counted from *repo_path*
+    with the same filters as the pipeline.  Safe to call from a worker thread
+    (the bar lives on the same thread as the pipeline).
+    """
+    from smritikosh.indexing.pipeline import build_index, count_source_files
+
+    if n_files is None:
+        n_files = count_source_files(repo_path)
+
+    with click.progressbar(
+        length=n_files,
+        show_eta=True,
+        show_percent=True,
+        bar_template="  %(bar)s  %(info)s",
+        fill_char="█",
+        empty_char="░",
+    ) as bar:
+
+        def _on_file(path: str) -> None:  # noqa: E306
+            bar.update(1)
+
+        build_index(
+            repo_path,
+            embedder,
+            storage,
+            vector_store,
+            on_file_indexed=_on_file,
+            full=full,
+        )
 
 
 async def _watch_loop(
@@ -66,13 +103,17 @@ async def _watch_loop(
             "Install it with: pip install watchfiles"
         ) from exc
 
-    from smritikosh.indexing.pipeline import build_index
-
     async for changes in awatch(repo_path):
         click.echo(f"  {len(changes)} change(s) detected — re-indexing …")
         # build_index calls asyncio.run() internally; dispatch to a worker
         # thread so it can create its own loop without conflicting with ours.
-        await asyncio.to_thread(build_index, repo_path, embedder, storage, vector_store)
+        await asyncio.to_thread(
+            _build_index_with_progress,
+            repo_path,
+            embedder,
+            storage,
+            vector_store,
+        )
         click.echo("  Done.")
 
 
@@ -117,9 +158,13 @@ def index(
     full: bool,
 ) -> None:
     """Build or incrementally update the vector index for REPO_PATH."""
-    from smritikosh.indexing.pipeline import build_index, count_source_files
+    from smritikosh.indexing.pipeline import count_source_files
 
-    emb = _make_embedder()
+    try:
+        emb = select_embedder()
+    except EmbedderUnavailableError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     storage, vector_store = _open_stores(db_path)
     try:
         if full:
@@ -127,29 +172,17 @@ def index(
 
         n_files = count_source_files(repo_path)
         click.echo(f"Indexing {repo_path!r} — {n_files} source file(s) …")
+        click.echo(f"Embedding: {emb.display_name}")
 
         t0 = time.perf_counter()
-        with click.progressbar(
-            length=n_files,
-            show_eta=True,
-            show_percent=True,
-            bar_template="  %(bar)s  %(info)s",
-            fill_char="█",
-            empty_char="░",
-        ) as bar:
-
-            def _on_file(path: str) -> None:  # noqa: E306
-                bar.update(1)
-
-            build_index(
-                repo_path,
-                emb,
-                storage,
-                vector_store,
-                on_file_indexed=_on_file,
-                full=full,
-            )
-
+        _build_index_with_progress(
+            repo_path,
+            emb,
+            storage,
+            vector_store,
+            n_files=n_files,
+            full=full,
+        )
         elapsed = time.perf_counter() - t0
         click.echo(f"Done in {elapsed:.1f}s.")
 
@@ -193,12 +226,22 @@ def search(
     results = []  # populated inside try; display happens after storage is closed
     t0 = time.perf_counter()
     try:
-        if vector_store.get_stored_dims() is None:
+        stored_dims = vector_store.get_stored_dims()
+        identity = vector_store.get_stored_identity()
+        if stored_dims is None:
             raise click.ClickException(
                 f"No index found at {db_path!r}. "
                 "Run `smritikosh index <repo_path>` first."
             )
-        emb = _make_embedder()
+        if identity is None:
+            raise click.ClickException(
+                "This index predates embedding metadata. Rebuild it once with "
+                "`smritikosh index <repo_path>`."
+            )
+        try:
+            emb = resolve_embedder(identity)
+        except EmbedderUnavailableError as exc:
+            raise click.ClickException(str(exc)) from exc
         idx = VectorIndex(vector_store, storage, emb)
         results = asyncio.run(idx.search(query, top_k))
     finally:

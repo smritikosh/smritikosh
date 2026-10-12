@@ -19,6 +19,7 @@ from smritikosh.models import (
     SourceLine,
     TextMatch,
 )
+from smritikosh.ports.embedder import EmbeddingIdentity
 from smritikosh.ports.source_reader import SourceReader
 
 if TYPE_CHECKING:
@@ -107,6 +108,13 @@ class DuckDBSourceReader(SourceReader):
             vectors=vector_count,
             dimensions=dimensions,
         )
+
+    def embedding_identity(self) -> EmbeddingIdentity | None:
+        """Return the vector-space identity stored with this index."""
+        row: tuple[str] | None = self._connection.execute(
+            "SELECT value FROM kv_store WHERE key = 'embedding_identity'"
+        ).fetchone()
+        return EmbeddingIdentity(**json.loads(row[0])) if row else None
 
     def semantic_search(
         self,

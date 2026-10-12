@@ -9,6 +9,7 @@ import duckdb
 import pytest
 
 from smritikosh.adapters.retrieval.source import DuckDBSourceReader
+from smritikosh.ports.embedder import EmbeddingIdentity
 from smritikosh.ports.source_reader import SourceReader
 
 
@@ -61,6 +62,11 @@ def reader(tmp_path: Path) -> DuckDBSourceReader:
                 ),
             ),
         ],
+    )
+    identity = EmbeddingIdentity("test-model", "test-space-v1", 3)
+    connection.execute(
+        "INSERT INTO kv_store VALUES ('embedding_identity', ?)",
+        [json.dumps(identity.__dict__)],
     )
     connection.close()
     return DuckDBSourceReader(str(db_path))
@@ -115,6 +121,16 @@ def test_ignores_nodes_that_are_not_chunks(reader: DuckDBSourceReader) -> None:
 
 def test_implements_the_source_reader_port(reader: DuckDBSourceReader) -> None:
     assert isinstance(reader, SourceReader)
+
+
+def test_returns_the_stored_embedding_identity(
+    reader: DuckDBSourceReader,
+) -> None:
+    assert reader.embedding_identity() == EmbeddingIdentity(
+        "test-model",
+        "test-space-v1",
+        3,
+    )
 
 
 def test_leaving_the_context_closes_the_connection(reader: DuckDBSourceReader) -> None:

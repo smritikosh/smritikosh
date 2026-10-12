@@ -1,9 +1,14 @@
 """Public model exports for smritikosh."""
 
 from smritikosh.models.retrieval import (
+    CandidateScore,
+    HybridSearchOptions,
     IndexedChunk,
     IndexInfo,
     OutlineEntry,
+    RankedCandidate,
+    RetrievalChannel,
+    SearchLocation,
     SearchOptions,
     SourceLine,
     TextMatch,
@@ -19,13 +24,18 @@ from smritikosh.models.types import (
 )
 
 __all__ = [
+    "CandidateScore",
     "Capture",
     "Chunk",
     "ChunkingStrategy",
+    "HybridSearchOptions",
     "IndexInfo",
     "IndexedChunk",
     "OutlineEntry",
     "ParsedFile",
+    "RankedCandidate",
+    "RetrievalChannel",
+    "SearchLocation",
     "SearchOptions",
     "SearchResult",
     "SourceFile",

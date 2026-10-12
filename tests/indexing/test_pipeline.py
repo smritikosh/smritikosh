@@ -8,11 +8,13 @@ from typing import Any
 
 import duckdb
 
+from smritikosh.adapters.retrieval.duckdb import DuckDBBm25Store
 from smritikosh.adapters.storage.duckdb import DuckDBAdapter
 from smritikosh.adapters.vector_store.duckdb import DuckDBVectorStore
 from smritikosh.engine import PipelineContext
 from smritikosh.indexing.pipeline._pipeline import (
     EMBEDDER,
+    LEXICAL_STORE,
     STORAGE,
     VECTOR_STORE,
     _embed_one,
@@ -20,7 +22,7 @@ from smritikosh.indexing.pipeline._pipeline import (
     process_chunk,
     process_file,
 )
-from smritikosh.models import Chunk, SourceFile
+from smritikosh.models import Chunk, SearchOptions, SourceFile
 from smritikosh.ports.embedder import Embedder
 
 # ── Stubs ─────────────────────────────────────────────────────────────────────
@@ -39,9 +41,19 @@ class _Embedder(Embedder):
         return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
 
 
+class _OtherEmbedder(_Embedder):
+    """Same width, different vector space and output."""
+
+    model_id = "other:4"
+
+    def encode_documents(self, texts: list[str]) -> list[list[float]]:
+        return [[0.4, 0.3, 0.2, 0.1] for _ in texts]
+
+
 class _VectorStore:
     def __init__(self) -> None:
         self._store: dict[str, list[float]] = {}
+        self.batch_sizes: list[int] = []
 
     def setup(self, dims: int) -> None: ...  # noqa: D401
     def exists(self, chunk_id: str) -> bool:
@@ -50,8 +62,16 @@ class _VectorStore:
     def upsert(self, chunk_id: str, vector: list[float]) -> None:
         self._store[chunk_id] = vector
 
+    def upsert_many(self, items) -> None:
+        self.batch_sizes.append(len(items))
+        for chunk_id, vector in items:
+            self._store[chunk_id] = vector
+
     def delete(self, chunk_id: str) -> None:
         self._store.pop(chunk_id, None)
+
+    def clear(self) -> None:
+        self._store.clear()
 
 
 class _Storage:
@@ -82,7 +102,32 @@ class _Storage:
     def delete_file(self, path: str) -> None:
         self._files.pop(path, None)
 
+    def clear_nodes(self) -> None:
+        self._chunks.clear()
+
     def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[dict[str, Any]]:
+        return []
+
+
+class _LexicalStore:
+    def __init__(self) -> None:
+        self.chunk_ids: set[str] = set()
+
+    def setup(self) -> bool:
+        return False
+
+    def upsert(self, chunks: list[Chunk]) -> None:
+        self.chunk_ids.update(chunk.id for chunk in chunks)
+
+    def delete(self, chunk_id: str) -> None:
+        self.chunk_ids.discard(chunk_id)
+
+    def delete_path(self, path: str) -> None: ...
+
+    def clear(self) -> None:
+        self.chunk_ids.clear()
+
+    def search(self, query: str, *, options: Any) -> list[tuple[str, float]]:
         return []
 
 
@@ -213,7 +258,8 @@ async def test_process_chunk_skips_when_vector_already_exists() -> None:
     assert list(vs._store.values()) == [[0.1, 0.2, 0.3, 0.4]]  # unchanged
 
 
-async def test_process_chunk_embeds_and_upserts_new_chunk() -> None:
+async def test_process_chunk_returns_the_embedded_vector() -> None:
+    """The caller writes it, so a whole file lands in one round trip."""
     vs = _VectorStore()
     chunk = _make_chunk()
 
@@ -221,10 +267,43 @@ async def test_process_chunk_embeds_and_upserts_new_chunk() -> None:
     ctx.provide(VECTOR_STORE, vs)
     ctx.provide(EMBEDDER, _Embedder())
     with ctx:
-        await process_chunk(chunk)
+        result = await process_chunk(chunk)
 
-    assert chunk.id in vs._store
-    assert len(vs._store[chunk.id]) == 4
+    assert result is not None
+    chunk_id, vector = result
+    assert chunk_id == chunk.id
+    assert len(vector) == 4
+    assert vs._store == {}  # process_chunk must not write
+
+
+async def test_process_chunk_returns_none_for_an_already_stored_chunk() -> None:
+    vs = _VectorStore()
+    chunk = _make_chunk()
+    vs.upsert(chunk.id, [0.0, 0.0, 0.0, 0.0])
+
+    ctx = PipelineContext()
+    ctx.provide(VECTOR_STORE, vs)
+    ctx.provide(EMBEDDER, _Embedder())
+    with ctx:
+        assert await process_chunk(chunk) is None
+
+
+async def test_process_file_writes_every_vector_in_one_batch() -> None:
+    """Regression: one write per chunk made storing vectors 75% of a run."""
+    storage = _Storage()
+    vs = _VectorStore()
+    source = _make_source()
+
+    ctx = PipelineContext()
+    ctx.provide(STORAGE, storage)
+    ctx.provide(VECTOR_STORE, vs)
+    ctx.provide(EMBEDDER, _Embedder())
+    ctx.provide(LEXICAL_STORE, _LexicalStore())
+    with ctx:
+        await process_file(source)
+
+    assert len(vs.batch_sizes) == 1
+    assert vs.batch_sizes[0] == len(vs._store)
 
 
 # ── process_file ──────────────────────────────────────────────────────────────
@@ -239,6 +318,7 @@ async def test_process_file_writes_file_hash_after_success() -> None:
     ctx.provide(STORAGE, storage)
     ctx.provide(VECTOR_STORE, vs)
     ctx.provide(EMBEDDER, _Embedder())
+    ctx.provide(LEXICAL_STORE, _LexicalStore())
     with ctx:
         await process_file(source)
 
@@ -260,6 +340,7 @@ async def test_process_file_removes_stale_chunks() -> None:
     ctx.provide(STORAGE, storage)
     ctx.provide(VECTOR_STORE, vs)
     ctx.provide(EMBEDDER, _Embedder())
+    ctx.provide(LEXICAL_STORE, _LexicalStore())
     with ctx:
         await process_file(source)
 
@@ -411,3 +492,105 @@ def test_build_index_reports_every_file_to_the_callback(tmp_path: Path) -> None:
     )
 
     assert sorted(seen) == ["one.py", "two.py"]
+
+
+def test_build_index_reembeds_when_vector_space_changes_at_same_width(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "hello.py").write_text("def hello(): pass\n")
+    connection = duckdb.connect(":memory:")
+    storage = DuckDBAdapter(con=connection)
+    vector_store = DuckDBVectorStore(con=connection)
+
+    build_index(
+        str(tmp_path),
+        embedder=_Embedder(),
+        storage=storage,
+        vector_store=vector_store,
+    )
+    before = connection.execute("SELECT vector FROM vectors").fetchone()[0]
+
+    build_index(
+        str(tmp_path),
+        embedder=_OtherEmbedder(),
+        storage=storage,
+        vector_store=vector_store,
+    )
+    after = connection.execute("SELECT vector FROM vectors").fetchone()[0]
+
+    assert before != after
+    assert vector_store.get_stored_identity() == _OtherEmbedder().identity
+
+
+def test_build_index_refills_the_lexical_index_after_a_schema_change(
+    tmp_path: Path,
+) -> None:
+    """A changed lexical schema must rebuild, not leave an empty index.
+
+    The postings are written by the memoised process_file, so discarding them
+    while the memo cache still claims every file is current left an ordinary
+    run with nothing to write back and lexical search silently empty.
+    """
+    (tmp_path / "hello.py").write_text("def hello(): pass\n")
+
+    con = duckdb.connect(":memory:")
+    storage = DuckDBAdapter(con=con)
+    vs = DuckDBVectorStore(con=con)
+    lexical = DuckDBBm25Store(con=con)
+    build_index(
+        str(tmp_path),
+        embedder=_Embedder(),
+        storage=storage,
+        vector_store=vs,
+        lexical_store=lexical,
+    )
+    con.execute(
+        "UPDATE lexical_metadata SET value = 'older' WHERE key = 'schema_version'"
+    )
+
+    build_index(
+        str(tmp_path),
+        embedder=_Embedder(),
+        storage=storage,
+        vector_store=vs,
+        lexical_store=lexical,
+    )
+
+    assert lexical.search("hello", options=SearchOptions(top_k=5))
+
+
+def test_build_index_removes_all_indexes_when_source_file_is_deleted(
+    tmp_path: Path,
+) -> None:
+    source_path: Path = tmp_path / "hello.py"
+    source_path.write_text("def hello(): pass\n")
+    connection = duckdb.connect(":memory:")
+    storage = DuckDBAdapter(con=connection)
+    vector_store = DuckDBVectorStore(con=connection)
+    lexical_store = DuckDBBm25Store(con=connection)
+    build_index(
+        str(tmp_path),
+        embedder=_Embedder(),
+        storage=storage,
+        vector_store=vector_store,
+        lexical_store=lexical_store,
+    )
+    (chunk_id,) = storage.get_chunk_ids_for_file("hello.py")
+
+    source_path.unlink()
+    build_index(
+        str(tmp_path),
+        embedder=_Embedder(),
+        storage=storage,
+        vector_store=vector_store,
+        lexical_store=lexical_store,
+    )
+
+    assert vector_store.exists(chunk_id) is False
+    assert (
+        lexical_store.search(
+            "hello",
+            options=SearchOptions(top_k=5),
+        )
+        == []
+    )

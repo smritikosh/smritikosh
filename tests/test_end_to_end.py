@@ -58,7 +58,7 @@ def store(
 ) -> DuckDBVectorStore:
     db_path: Path = tmp_path_factory.mktemp("index") / "smritikosh.duckdb"
     store = DuckDBVectorStore(str(db_path))
-    store.setup(embedder.dims)
+    store.setup(embedder.identity)
 
     vectors = embedder.encode_documents(list(SNIPPETS))
     for text, vector in zip(SNIPPETS, vectors, strict=True):

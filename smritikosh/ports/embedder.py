@@ -3,14 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
-__all__ = ["Embedder"]
+__all__ = ["Embedder", "EmbeddingIdentity"]
 
 #: Fallback context window for an adapter that does not declare one.  512 is
 #: the smallest window in common use (BERT-family encoders), so assuming it
 #: never over-fills a model — it only splits more than strictly necessary.
 _CONSERVATIVE_MAX_TOKENS = 512
+
+
+@dataclass(frozen=True)
+class EmbeddingIdentity:
+    """Identify a vector space independently of its execution runtime."""
+
+    model: str
+    vector_space: str
+    dimensions: int
 
 
 class Embedder(ABC):
@@ -27,6 +38,20 @@ class Embedder(ABC):
         """Model identity; a change invalidates every cached embedding."""
 
     @property
+    def identity(self) -> EmbeddingIdentity:
+        """Return the compatibility identity persisted with an index."""
+        return EmbeddingIdentity(
+            model=self.model_id,
+            vector_space=self.model_id,
+            dimensions=self.dims,
+        )
+
+    @property
+    def display_name(self) -> str:
+        """Return a user-facing description without adapter implementation names."""
+        return self.model_id
+
+    @property
     def max_tokens(self) -> int:
         """Tokens the model reads before it silently truncates the rest.
 
@@ -37,6 +62,10 @@ class Embedder(ABC):
         their context window should override this.
         """
         return _CONSERVATIVE_MAX_TOKENS
+
+    def count_tokens(self, text: str) -> int:
+        """Count model tokens, conservatively when no tokenizer is exposed."""
+        return math.ceil(len(text) / 2.5) + 2
 
     @abstractmethod
     def encode_documents(self, texts: list[str]) -> list[list[float]]: ...
