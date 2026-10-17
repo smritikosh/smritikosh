@@ -73,7 +73,6 @@ stopped, or misbehaving, the search simply embeds in-process, exactly as before.
 default in CI, where machines are one-shot.
 
 ```bash
-smritikosh serve --stop          # reclaim the memory now
 SMRITIKOSH_EMBED_SERVER=0 ...    # disable the server entirely
 SMRITIKOSH_EMBED_IDLE_MINUTES=60 # change the idle shutdown delay
 ```

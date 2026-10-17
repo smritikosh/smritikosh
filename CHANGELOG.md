@@ -19,8 +19,7 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   searches skip the multi-second model load (~1s instead of ~16s). It talks to searches
   over a user-private Unix socket, embeds queries only (never opens an index), exits
   after 30 idle minutes, and any failure falls back to in-process embedding. Controls:
-  `smritikosh serve [--stop]`, `SMRITIKOSH_EMBED_SERVER=0|1`,
-  `SMRITIKOSH_EMBED_IDLE_MINUTES`. Off by default in CI.
+  `SMRITIKOSH_EMBED_SERVER=0|1` and `SMRITIKOSH_EMBED_IDLE_MINUTES`. Off by default in CI.
 
 ### Changed
 
