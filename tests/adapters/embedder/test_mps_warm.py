@@ -5,7 +5,7 @@ real wire protocol without ever spawning a process or loading a checkpoint.
 
 Coverage map
 ────────────
-_warm_enabled     – default on, off in CI, forced on/off by env
+warm_enabled      – default on, off in CI, forced on/off by env
 _socket_path      – version-stamped, user-private runtime dir
 encode_queries    – warm path sends raw texts, falls back in-process on any
                     failure, documents never touch the server
@@ -14,6 +14,7 @@ daemon            – roundtrip vectors, parallel clients share one server,
                     dropped and later clients served, server error reaches the
                     client, idle exit removes the socket, stop command
 stop_server       – False when nothing is running
+__main__          – the package runs as the daemon entry point
 """
 
 from __future__ import annotations
@@ -21,6 +22,8 @@ from __future__ import annotations
 import importlib.metadata
 import socket
 import stat
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -29,8 +32,8 @@ from pathlib import Path
 
 import pytest
 
-import smritikosh.adapters.embedder.mps as mps
-from smritikosh.adapters.embedder.mps import MpsEmbedder
+from smritikosh.adapters.embedder.mps import client, daemon
+from smritikosh.adapters.embedder.mps.embedder import MpsEmbedder
 from smritikosh.constants import CODE_QUERY_INSTRUCTION
 
 
@@ -73,15 +76,15 @@ def warm(monkeypatch) -> Path:
     """
     _FakeEmbedder.instances = []
     sock_path = Path(tempfile.mkdtemp(prefix="smri-warm-")) / "t.sock"
-    monkeypatch.setattr(mps, "_socket_path", lambda: sock_path)
-    monkeypatch.setattr(mps, "_READ_TIMEOUT_S", 1.0)
-    monkeypatch.setattr(mps, "MpsEmbedder", _FakeEmbedder)
-    monkeypatch.setenv(mps._WARM_ENV, "1")
+    monkeypatch.setattr(daemon, "_socket_path", lambda: sock_path)
+    monkeypatch.setattr(daemon, "_READ_TIMEOUT_S", 1.0)
+    monkeypatch.setattr(daemon, "MpsEmbedder", _FakeEmbedder)
+    monkeypatch.setenv(daemon._WARM_ENV, "1")
     return sock_path
 
 
 def _start(sock_path: Path, **kwargs) -> threading.Thread:
-    thread = threading.Thread(target=mps.run_server, kwargs=kwargs, daemon=True)
+    thread = threading.Thread(target=daemon.run_server, kwargs=kwargs, daemon=True)
     thread.start()
     for _ in range(200):
         if sock_path.exists():
@@ -91,41 +94,41 @@ def _start(sock_path: Path, **kwargs) -> threading.Thread:
 
 
 def _stop(sock_path: Path, thread: threading.Thread) -> None:
-    assert mps.stop_server()
+    assert client.stop_server()
     thread.join(timeout=5)
     assert not thread.is_alive()
     assert not sock_path.exists()  # removed on exit
 
 
-# ── _warm_enabled ─────────────────────────────────────────────────────────────
+# ── warm_enabled ──────────────────────────────────────────────────────────────
 
 
 def test_warm_enabled_by_default(monkeypatch) -> None:
-    monkeypatch.delenv(mps._WARM_ENV, raising=False)
+    monkeypatch.delenv(daemon._WARM_ENV, raising=False)
     monkeypatch.delenv("CI", raising=False)
 
-    assert mps._warm_enabled()
+    assert client.warm_enabled()
 
 
 def test_warm_disabled_by_env(monkeypatch) -> None:
-    monkeypatch.setenv(mps._WARM_ENV, "0")
+    monkeypatch.setenv(daemon._WARM_ENV, "0")
 
-    assert not mps._warm_enabled()
+    assert not client.warm_enabled()
 
 
 def test_warm_defaults_off_in_ci(monkeypatch) -> None:
     """One-shot CI machines gain nothing from a daemon holding 1 GB."""
-    monkeypatch.delenv(mps._WARM_ENV, raising=False)
+    monkeypatch.delenv(daemon._WARM_ENV, raising=False)
     monkeypatch.setenv("CI", "true")
 
-    assert not mps._warm_enabled()
+    assert not client.warm_enabled()
 
 
 def test_warm_forced_on_overrides_ci(monkeypatch) -> None:
-    monkeypatch.setenv(mps._WARM_ENV, "1")
+    monkeypatch.setenv(daemon._WARM_ENV, "1")
     monkeypatch.setenv("CI", "true")
 
-    assert mps._warm_enabled()
+    assert client.warm_enabled()
 
 
 # ── _socket_path ──────────────────────────────────────────────────────────────
@@ -135,7 +138,7 @@ def test_socket_path_is_versioned_and_user_private(monkeypatch, tmp_path) -> Non
     """The version in the name keeps upgraded clients off an old server."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
 
-    path = mps._socket_path()
+    path = daemon._socket_path()
 
     assert importlib.metadata.version("smritikosh") in path.name
     assert path.parent == tmp_path / "smritikosh"
@@ -147,7 +150,7 @@ def test_socket_path_is_versioned_and_user_private(monkeypatch, tmp_path) -> Non
 
 @pytest.fixture()
 def warm_client(monkeypatch):
-    monkeypatch.setenv(mps._WARM_ENV, "1")
+    monkeypatch.setenv(daemon._WARM_ENV, "1")
     return monkeypatch
 
 
@@ -159,7 +162,7 @@ def test_encode_queries_sends_raw_texts_to_the_server(warm_client) -> None:
         sent.append(list(texts))
         return [[9.9]]
 
-    warm_client.setattr(mps, "_encode_via_server", fake_encode_via_server)
+    warm_client.setattr(client, "encode_via_server", fake_encode_via_server)
     embedder = MpsEmbedder()
     warm_client.setattr(
         embedder, "_encode", lambda texts: pytest.fail("must not embed in-process")
@@ -175,7 +178,7 @@ def test_encode_queries_falls_back_in_process(warm_client) -> None:
     def raise_oserror(texts):
         raise OSError("no server")
 
-    warm_client.setattr(mps, "_encode_via_server", raise_oserror)
+    warm_client.setattr(client, "encode_via_server", raise_oserror)
     embedder = MpsEmbedder()
     session = _StubSession()
     embedder._model = session  # type: ignore[assignment]
@@ -187,8 +190,8 @@ def test_encode_queries_falls_back_in_process(warm_client) -> None:
 def test_encode_documents_never_touches_the_server(warm_client) -> None:
     """Indexing batches stay in-process; the server is a search-time shortcut."""
     warm_client.setattr(
-        mps,
-        "_encode_via_server",
+        client,
+        "encode_via_server",
         lambda texts: pytest.fail("documents stay in-process"),
     )
     embedder = MpsEmbedder()
@@ -203,7 +206,7 @@ def test_encode_documents_never_touches_the_server(warm_client) -> None:
 def test_roundtrip_returns_vectors(warm) -> None:
     thread = _start(warm, idle_minutes=5)
     try:
-        assert mps._encode_via_server(["retry failed uploads"]) == [[1.0, 2.0]]
+        assert client.encode_via_server(["retry failed uploads"]) == [[1.0, 2.0]]
         assert _FakeEmbedder.instances[0].queries == [["retry failed uploads"]]
     finally:
         _stop(warm, thread)
@@ -214,7 +217,7 @@ def test_parallel_clients_share_one_server(warm) -> None:
     try:
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(
-                pool.map(lambda i: mps._encode_via_server([f"q{i}"]), range(8))
+                pool.map(lambda i: client.encode_via_server([f"q{i}"]), range(8))
             )
         assert all(r == [[1.0, 2.0]] for r in results)
         served = [q for inst in _FakeEmbedder.instances for q in inst.queries]
@@ -227,7 +230,7 @@ def test_concurrent_startups_keep_exactly_one_server(warm) -> None:
     """The flock is held for a server's lifetime; a loser exits at once."""
     thread = _start(warm, idle_minutes=5)
     try:
-        assert mps.run_server(idle_minutes=5) == 0  # returns immediately
+        assert daemon.run_server(idle_minutes=5) == 0  # returns immediately
         assert len(_FakeEmbedder.instances) == 0  # and never served anything
     finally:
         _stop(warm, thread)
@@ -240,7 +243,7 @@ def test_stalled_client_is_dropped_and_others_served(warm) -> None:
     stalled.connect(str(warm))
     try:
         started = time.monotonic()
-        assert mps._encode_via_server(["q"]) == [[1.0, 2.0]]
+        assert client.encode_via_server(["q"]) == [[1.0, 2.0]]
         # _READ_TIMEOUT_S is patched to 1s; a hang would look like 5x that.
         assert time.monotonic() - started < 5
     finally:
@@ -255,11 +258,11 @@ def test_server_side_error_reaches_the_client(warm, monkeypatch) -> None:
         def encode_queries(self, texts):
             raise RuntimeError("GPU wedged")
 
-    monkeypatch.setattr(mps, "MpsEmbedder", lambda: _Failing())
+    monkeypatch.setattr(daemon, "MpsEmbedder", lambda: _Failing())
     thread = _start(warm, idle_minutes=5)
     try:
         with pytest.raises(OSError, match="GPU wedged"):
-            mps._encode_via_server(["q"])
+            client.encode_via_server(["q"])
     finally:
         _stop(warm, thread)
 
@@ -274,4 +277,17 @@ def test_idle_exit_removes_the_socket(warm) -> None:
 
 
 def test_stop_server_returns_false_without_a_server(warm) -> None:
-    assert not mps.stop_server()
+    assert not client.stop_server()
+
+
+# ── __main__ entry point ──────────────────────────────────────────────────────
+
+
+def test_package_runs_as_the_daemon_entry_point() -> None:
+    """`python -m smritikosh.adapters.embedder.mps` is what _spawn execs."""
+    result = subprocess.run(
+        [sys.executable, "-m", "smritikosh.adapters.embedder.mps", "--help"],
+        capture_output=True,
+        timeout=60,
+    )
+    assert result.returncode == 0
