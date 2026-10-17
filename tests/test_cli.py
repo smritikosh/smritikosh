@@ -471,3 +471,46 @@ def test_search_omits_chunk_kind_brackets_when_kind_is_none(runner, db_path) -> 
 
     score_line = next(line for line in result.output.splitlines() if "score=" in line)
     assert "[" not in score_line
+
+
+# ── smritikosh serve ──────────────────────────────────────────────────────────
+# The mps module holds the implementation; these tests only check forwarding.
+
+
+def test_serve_stop_reports_when_nothing_is_running(runner, monkeypatch) -> None:
+    monkeypatch.setattr("smritikosh.adapters.embedder.mps.stop_server", lambda: False)
+
+    result = runner.invoke(main, ["serve", "--stop"])
+
+    assert result.exit_code == 0
+    assert "No warm embedding server is running." in result.output
+
+
+def test_serve_stop_stops_a_running_server(runner, monkeypatch) -> None:
+    monkeypatch.setattr("smritikosh.adapters.embedder.mps.stop_server", lambda: True)
+
+    result = runner.invoke(main, ["serve", "--stop"])
+
+    assert result.exit_code == 0
+    assert "Warm embedding server stopped." in result.output
+
+
+def test_serve_ensures_a_server_is_running(runner, monkeypatch) -> None:
+    monkeypatch.setattr("smritikosh.adapters.embedder.mps.ensure_server", lambda: None)
+
+    result = runner.invoke(main, ["serve"])
+
+    assert result.exit_code == 0
+    assert "Warm embedding server is running." in result.output
+
+
+def test_serve_reports_a_start_failure(runner, monkeypatch) -> None:
+    def fail():
+        raise OSError("socket vanished")
+
+    monkeypatch.setattr("smritikosh.adapters.embedder.mps.ensure_server", fail)
+
+    result = runner.invoke(main, ["serve"])
+
+    assert result.exit_code != 0
+    assert "Could not start" in result.output

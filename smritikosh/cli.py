@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.metadata
+import socket
 import time
 from typing import TYPE_CHECKING
 
@@ -266,6 +267,37 @@ def search(
         for line in (r.snippet or "").splitlines():
             click.echo(f"    {line}")
         click.echo()
+
+
+# ── smritikosh serve ──────────────────────────────────────────────────────────
+
+
+@main.command()
+@click.option(
+    "--stop",
+    is_flag=True,
+    help="Stop the running warm embedding server, freeing its memory.",
+)
+def serve(stop: bool) -> None:
+    """Manage the warm embedding server (searches start it automatically)."""
+    from smritikosh.adapters.embedder.mps import ensure_server, stop_server
+
+    if not hasattr(socket, "AF_UNIX"):
+        raise click.ClickException("The warm embedding server needs a Unix system.")
+    if stop:
+        click.echo(
+            "Warm embedding server stopped."
+            if stop_server()
+            else "No warm embedding server is running."
+        )
+        return
+    try:
+        ensure_server()
+    except OSError as exc:
+        raise click.ClickException(
+            f"Could not start the warm embedding server: {exc}"
+        ) from exc
+    click.echo("Warm embedding server is running.")
 
 
 if __name__ == "__main__":

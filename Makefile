@@ -49,6 +49,7 @@ FAST_TESTS := tests/engine/ tests/models/ tests/ports/ \
 	tests/adapters/storage/ tests/adapters/retrieval/ \
 	tests/adapters/embedder/test_make_embedder.py \
 	tests/adapters/embedder/test_mps.py \
+	tests/adapters/embedder/test_mps_warm.py \
 	tests/adapters/embedder/test_query_prefixes.py \
 	tests/queries/ tests/indexing/ tests/retrieval/ \
 	tests/test_cli.py \
