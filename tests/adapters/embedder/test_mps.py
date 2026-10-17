@@ -67,6 +67,12 @@ class _OverlapDetectingSession:
         return [_StubVector() for _ in texts]
 
 
+@pytest.fixture(autouse=True)
+def _no_warm_server(monkeypatch) -> None:
+    """These tests exercise the in-process adapter; keep the warm server off."""
+    monkeypatch.setenv("SMRITIKOSH_EMBED_SERVER", "0")
+
+
 @pytest.fixture()
 def stubbed() -> tuple[MpsEmbedder, _StubSession]:
     embedder = MpsEmbedder()
@@ -257,3 +263,95 @@ def test_concurrent_encodes_never_overlap() -> None:
         list(pool.map(lambda i: embedder.encode_documents([str(i)]), range(16)))
 
     assert session.peak_concurrent == 1
+
+
+# ── Cache-first loading ─────────────────────────────────────────────────────
+# _build imports torch/ST/transformers lazily, so fakes in sys.modules are
+# enough: no torch, no GPU, no network — just a record of what was asked.
+
+
+def _fake_runtime(monkeypatch, *, fail_local: bool = False):
+    """Install fake torch/ST/transformers/truststore modules.
+
+    Returns (st_calls, tok_calls, truststore_calls): every constructor's
+    kwargs plus each truststore injection. fail_local makes the
+    local_files_only=True attempt raise OSError, a genuine cache miss.
+    """
+    import sys
+    import types
+
+    st_calls: list[dict] = []
+    tok_calls: list[dict] = []
+    truststore_calls: list[bool] = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model, **kwargs):
+            st_calls.append(kwargs)
+            if kwargs["local_files_only"] and fail_local:
+                raise OSError("not in local cache")
+            self.max_seq_length = None
+
+    class FakeAutoTokenizer:
+        @staticmethod
+        def from_pretrained(model, **kwargs):
+            tok_calls.append(kwargs)
+            if kwargs["local_files_only"] and fail_local:
+                raise OSError("not in local cache")
+            return types.SimpleNamespace(backend_tokenizer=object())
+
+    torch = types.ModuleType("torch")
+    torch.backends = types.SimpleNamespace(
+        mps=types.SimpleNamespace(is_available=lambda: True)
+    )
+    st = types.ModuleType("sentence_transformers")
+    st.SentenceTransformer = FakeSentenceTransformer
+    tf = types.ModuleType("transformers")
+    tf.AutoTokenizer = FakeAutoTokenizer
+    ts = types.ModuleType("truststore")
+    ts.inject_into_ssl = lambda: truststore_calls.append(True)
+
+    for name, module in (
+        ("torch", torch),
+        ("sentence_transformers", st),
+        ("transformers", tf),
+        ("truststore", ts),
+    ):
+        monkeypatch.setitem(sys.modules, name, module)
+    return st_calls, tok_calls, truststore_calls
+
+
+def test_load_uses_local_cache_before_any_network(monkeypatch) -> None:
+    st_calls, tok_calls, truststore_calls = _fake_runtime(monkeypatch)
+
+    MpsEmbedder()._build()
+
+    assert [c["local_files_only"] for c in st_calls] == [True]
+    assert [c["local_files_only"] for c in tok_calls] == [True]
+    assert truststore_calls == []  # no proxy TLS work on the warm path
+
+
+def test_cache_miss_retries_with_download(monkeypatch) -> None:
+    st_calls, tok_calls, truststore_calls = _fake_runtime(monkeypatch, fail_local=True)
+
+    MpsEmbedder()._build()
+
+    assert [c["local_files_only"] for c in st_calls] == [True, False]
+    assert [c["local_files_only"] for c in tok_calls] == [False]
+    assert truststore_calls == [True]  # only the online path injects truststore
+
+
+def test_online_failure_after_cache_miss_propagates(monkeypatch) -> None:
+    import sys
+
+    _fake_runtime(monkeypatch, fail_local=True)
+
+    class FailingSentenceTransformer:
+        def __init__(self, *args, **kwargs):
+            raise OSError("network down")
+
+    sys.modules[
+        "sentence_transformers"
+    ].SentenceTransformer = FailingSentenceTransformer
+
+    with pytest.raises(OSError, match="network down"):
+        MpsEmbedder()._build()

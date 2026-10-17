@@ -3,6 +3,12 @@
 This adapter runs the fp32 CodeRankEmbed checkpoint. Its vectors are not
 compatible with the portable adapter's quantized ONNX vectors, so each adapter
 declares a distinct vector-space identity.
+
+Loading that checkpoint costs seconds even from the local cache, and every CLI
+process paid it before exiting after one search. So ``encode_queries`` first
+asks the warm server kept by this package (see ``client`` and ``daemon``),
+falling back to in-process loading whenever it is disabled, missing, or
+misbehaving.
 """
 
 from __future__ import annotations
@@ -122,6 +128,19 @@ class MpsEmbedder(Embedder):
         return self._encode(texts)
 
     def encode_queries(self, texts: list[str]) -> list[list[float]]:
+        # A warm per-user server may already hold this model in RAM; asking it
+        # skips the multi-second load every CLI process would otherwise pay.
+        # Imported lazily so this module stays importable on its own — the
+        # client and daemon make a package, and the adapter must not cycle.
+        from smritikosh.adapters.embedder.mps import client
+
+        if client.warm_enabled():
+            try:
+                return client.encode_via_server(texts)
+            except Exception:
+                logger.info(
+                    "warm server unavailable; embedding in-process", exc_info=True
+                )
         # CodeRankEmbed is asymmetric: the instruction is what puts a query in
         # the same space as the documents, and omitting it degrades retrieval.
         return self._encode([self._query_prefix + t for t in texts])
@@ -186,12 +205,6 @@ class MpsEmbedder(Embedder):
 
         Call only while holding ``_lock``.
         """
-        import truststore
-
-        # Corporate proxies (Zscaler etc.) MITM TLS; inject the OS trust store
-        # so the weights download succeeds without extra CA bundles.
-        truststore.inject_into_ssl()
-
         try:
             import torch
             from sentence_transformers import SentenceTransformer
@@ -206,18 +219,55 @@ class MpsEmbedder(Embedder):
                 "fastembed embedder instead."
             )
 
-        logger.info("Loading %s onto MPS", self._model_name)
-        model = SentenceTransformer(
+        # Cache-first: a warm local load skips the hub's freshness checks,
+        # which through a corporate proxy cost more than the load itself
+        # (measured ~13.5s vs ~5s). Any failure — a genuine cache miss or a
+        # half-populated cache — falls through to the original online path,
+        # so first-time installation still works.
+        try:
+            return self._load_checkpoint(
+                SentenceTransformer, AutoTokenizer, local_only=True
+            )
+        except Exception:
+            logger.info("No usable local cache for %s — downloading", self._model_name)
+
+        import truststore
+
+        # Corporate proxies (Zscaler etc.) MITM TLS; inject the OS trust store
+        # so the weights download succeeds without extra CA bundles. Only the
+        # online path needs it — the local cache never touches the network.
+        truststore.inject_into_ssl()
+        return self._load_checkpoint(
+            SentenceTransformer, AutoTokenizer, local_only=False
+        )
+
+    def _load_checkpoint(
+        self,
+        sentence_transformer_cls: type[SentenceTransformer],
+        auto_tokenizer_cls,
+        *,
+        local_only: bool,
+    ) -> tuple[SentenceTransformer, object]:
+        """Load the model and its private counting tokenizer.
+
+        ``local_only=True`` refuses all network access (hub freshness checks
+        included) and raises when the checkpoint is not cached.
+        """
+        logger.info("Loading %s onto MPS (local_only=%s)", self._model_name, local_only)
+        model = sentence_transformer_cls(
             self._model_name,
             trust_remote_code=True,
             device="mps",
+            local_files_only=local_only,
         )
         model.max_seq_length = self._max_seq_length
 
         # A second, private tokenizer for count_tokens.  Its raw Rust backend
         # is safe to read from many threads as long as nothing reconfigures
         # it, and nothing here ever does.
-        counter = AutoTokenizer.from_pretrained(
-            self._model_name, trust_remote_code=True
+        counter = auto_tokenizer_cls.from_pretrained(
+            self._model_name,
+            trust_remote_code=True,
+            local_files_only=local_only,
         ).backend_tokenizer
         return model, counter
