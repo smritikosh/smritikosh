@@ -48,7 +48,7 @@ dependencies = [
     # Pinned below 1.0: the 1.x line downloads grammar binaries at first use
     # into a user cache. 0.x bundles all grammars in the wheel, so an install
     # is deterministic, offline-safe, and covered by the lock file.
-    "tree-sitter-language-pack>=0.13,<1.0",
+    "tree-sitter-language-pack>=0.13,<2.0",
     "truststore>=0.9",
     "watchfiles>=0.21",
     "toons>=0.7",
