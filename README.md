@@ -62,6 +62,25 @@ On Apple silicon, Smritikosh automatically uses the GPU; elsewhere it uses its p
 CPU runtime. The index remembers its vector format, so search always restores the compatible
 runtime without another option.
 
+### Warm search on Apple silicon
+
+Loading the GPU model costs seconds, and a fresh CLI process paid it on every search. So the
+first `explore search` quietly starts a per-user background server that keeps the model
+loaded; later searches get vectors from it in about a second. The server only embeds query
+text — it never opens an index — talks over a Unix socket private to your user, holds roughly
+1 GB while warm, and exits on its own after 30 minutes without a request. If it is missing,
+stopped, or misbehaving, the search simply embeds in-process, exactly as before. It is off by
+default in CI, where machines are one-shot.
+
+```bash
+SMRITIKOSH_EMBED_SERVER=0 ...    # disable the server entirely
+SMRITIKOSH_EMBED_IDLE_MINUTES=60 # change the idle shutdown delay
+```
+
+One note on concurrency: any number of searches may read an index at once, but a DuckDB file
+still supports only one writer — don't run two `smritikosh index` commands against the same
+`--db-path` in parallel.
+
 ## Retrieval: _evidence you can point at_
 
 <img src="https://raw.githubusercontent.com/smritikosh/smritikosh/main/assets/hybrid-retrieval-light.svg" alt="An agent asks one plain question, why can't users log in, and Smritikosh turns it into four angles: where login is decided, what it checks, where it says no, and the tests that cover it. Each angle runs down three retrieval channels: semantic recall over dense vectors, lexical precision over BM25, and a call-graph channel that is not yet implemented. The rankings are combined by Reciprocal Rank Fusion, Facet Reservation, and Maximal Marginal Relevance, and what survives comes back as a short list of exact line ranges such as auth/policy.py 176-193: whole definitions plus one hop further, with line numbers that stay true." width="100%" draggable="false">

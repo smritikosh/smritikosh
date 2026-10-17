@@ -12,6 +12,21 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Added
+
+- Warm embedding server on Apple silicon. The first `explore search` starts a per-user
+  background process that keeps CodeRankEmbed loaded between CLI invocations, so later
+  searches skip the multi-second model load (~1s instead of ~16s). It talks to searches
+  over a user-private Unix socket, embeds queries only (never opens an index), exits
+  after 30 idle minutes, and any failure falls back to in-process embedding. Controls:
+  `SMRITIKOSH_EMBED_SERVER=0|1` and `SMRITIKOSH_EMBED_IDLE_MINUTES`. Off by default in CI.
+
+### Changed
+
+- The MPS embedder now loads cache-first (`local_files_only=True`), retrying online only
+  on a genuine cache miss. A warm local load no longer pays the hub's network freshness
+  checks (~13.5s → ~5s through a corporate proxy).
+
 ## [0.3.0] - 2026-10-07
 
 ### Added
