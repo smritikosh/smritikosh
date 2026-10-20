@@ -1,0 +1,102 @@
+# Arm definitions: one row per context condition under test.
+#
+# An arm is a pair of independent knobs, which is the whole point of the
+# matrix. `script` decides which retrieval tools exist. `docs` decides what
+# project documentation is appended to the system prompt. Holding one fixed
+# while flipping the other is what makes a difference attributable:
+#
+#   claude_md          - bare                = what documentation alone buys
+#   smritikosh         - bare                = what the index alone buys
+#   smritikosh_general - claude_md           = the index, docs held fixed
+#   smritikosh_tuned   - smritikosh_general  = what the tuned prompt adds
+#
+# `docs` is a list, appended in order after the base system prompt.
+#
+# `profile` names the index that must exist on disk before the arm runs.
+# Arms sharing a profile share one worktree, so an index is built once per
+# profile rather than once per arm.
+#
+# `enabled: false` keeps an arm defined but out of the run matrix. The
+# graphify arms stay off until the binary is installed; nothing else about
+# the harness changes when they are switched on.
+
+# Models. Override without editing this file:
+#
+#   make eval-pilot MODEL=... JUDGE_MODEL=...
+#   EVAL_MODEL=... python run.py
+#   python run.py --model ...   /   python grade.py --model ...
+#
+# Precedence, loosest last: this file < environment < command line.
+defaults:
+  # The agent under test. Same model for every arm — that is the point.
+  model: openrouter/anthropic/claude-sonnet-4.5
+  thinking: low
+
+  # The judge is a different vendor, not merely a cheaper model from the same
+  # family. An LLM shown output from its own family tends to prefer it — same
+  # phrasing, same idea of what a complete answer looks like — and the thing
+  # being measured here is retrieval, not house style.
+  judge_model: openrouter/google/gemini-2.5-flash
+
+  # The gap analyst reads a long dossier and has to reason about why
+  # retrieval failed, so it gets a stronger model than the grader. Defaults
+  # to `model` when unset.
+
+  # The sweep-wide backlog is written once and is the artefact a human acts
+  # on, so it is worth the strongest model available. Everything else in the
+  # harness runs dozens of times and has to be cheap; this runs once.
+  summary_model: openrouter/anthropic/claude-sonnet-4.6
+
+arms:
+  - id: bare
+    script: bare.sh
+    docs: null
+    profile: none
+    enabled: true
+    note: No retrieval tools, no docs. Agentic grep through bash, nothing else.
+
+  - id: claude_md
+    script: bare.sh
+    docs: [general.md]
+    profile: none
+    enabled: true
+    note: The "just write a good CLAUDE.md" comparator.
+
+  - id: smritikosh
+    script: smritikosh.sh
+    docs: null
+    profile: smritikosh
+    enabled: true
+    note: Index with no docs. Tool descriptions are the only guidance.
+
+  - id: smritikosh_general
+    script: smritikosh.sh
+    docs: [general.md]
+    profile: smritikosh
+    enabled: true
+    note: Index plus the same docs claude_md gets. Isolates the tool effect.
+
+  # Additive, in order: the tuned arm reads the same overview the other docs
+  # arms get, then the workflow block. Swapping general.md out instead of
+  # stacking on top of it would make this arm differ from smritikosh_general
+  # in two ways at once, and the subtraction between them would mean nothing.
+  - id: smritikosh_tuned
+    script: smritikosh.sh
+    docs: [general.md, smritikosh.md]
+    profile: smritikosh
+    enabled: true
+    note: Index plus docs that teach the facet -> chunks -> cite workflow.
+
+  - id: graphify
+    script: graphify.sh
+    docs: null
+    profile: graphify
+    enabled: false
+    note: Requires the graphify binary on PATH.
+
+  - id: both
+    script: both.sh
+    docs: null
+    profile: both
+    enabled: false
+    note: Requires the graphify binary on PATH.

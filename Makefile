@@ -1,4 +1,4 @@
-.PHONY: install install-root lock venv reset-env clean-venv verify-arch test cov check-wheel lint fmt check pre-commit-install pre-commit-run help
+.PHONY: install install-root lock venv reset-env clean-venv verify-arch test cov check-wheel lint fmt check pre-commit-install pre-commit-run help eval-prepare eval-run eval-grade eval-report eval-view eval-pilot eval-one eval-clean
 
 # ── Tool selection ─────────────────────────────────────────────────────────────
 # Override on the command line:  make install TOOL=uv  or  export TOOL=uv
@@ -74,6 +74,14 @@ help:
 	@echo "  check               Run lint and tests with coverage"
 	@echo "  pre-commit-install  Install pre-commit hooks"
 	@echo "  pre-commit-run      Run pre-commit hooks against all files"
+	@echo "  eval-pilot          Run the full agent eval: prepare, run, grade, report, analyze"
+	@echo "  eval-prepare        Build eval worktrees and indexes only"
+	@echo "  eval-run            Run the eval matrix only (RUN_ARGS='--questions q03')"
+	@echo "  eval-one            Run and grade a single cell (RUN=q03__smritikosh__r1)"
+	@echo "  eval-grade          Grade existing runs only"
+	@echo "  eval-report         Rebuild report.md, gaps.md and report.html"
+	@echo "  eval-view           Build report.html and open it in a browser"
+	@echo "  eval-clean          Delete eval runs, results, and worktrees"
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 
@@ -156,6 +164,83 @@ fmt:
 	$(VENV)/bin/ruff format smritikosh/ tests/
 
 check: lint cov
+
+# ── Evals ─────────────────────────────────────────────────────────────────────
+# Agent benchmark: does an agent with Smritikosh beat one with grep, or one
+# with a well-written CLAUDE.md? See evals/README.md for the design.
+#
+# The stages are separate targets because they fail for different reasons and
+# cost different amounts. Only eval-run spends money; prepare, grade and
+# report can all be re-run against an existing run tree for free.
+
+EVAL_DIR := $(CURDIR)/evals/harness
+
+# One variable per stage, because the stages do not share a flag vocabulary.
+# A single EVAL_ARGS forwarded to all of them meant `--questions q03` reached
+# prepare.py, which has never heard of questions, and the sweep died before
+# spending anything. Named separately so a flag can only reach the script
+# that understands it.
+#
+#   make eval-run  RUN_ARGS="--questions q03"
+#   make eval-run  RUN_ARGS="--arms bare,smritikosh_tuned --repeats 2"
+#   make eval-grade GRADE_ARGS="--passes 2"
+#   make eval-prepare PREPARE_ARGS=--force
+PREPARE_ARGS ?=
+RUN_ARGS ?=
+GRADE_ARGS ?=
+REPORT_ARGS ?=
+
+# Kept as an alias so older notes and scripts still work: everything it is
+# ever used for is a run.py flag.
+EVAL_ARGS ?=
+
+# Models are overridable from the command line without editing arms.yaml:
+#   make eval-pilot MODEL=openrouter/anthropic/claude-sonnet-4.5
+#   make eval-grade JUDGE_MODEL=openrouter/google/gemini-2.5-flash
+# Unset variables fall through to the defaults in evals/arms/arms.yaml.
+MODEL ?=
+JUDGE_MODEL ?=
+ANALYST_MODEL ?=
+SUMMARY_MODEL ?=
+EVAL_ENV := $(if $(MODEL),EVAL_MODEL=$(MODEL)) \
+            $(if $(JUDGE_MODEL),EVAL_JUDGE_MODEL=$(JUDGE_MODEL)) \
+            $(if $(ANALYST_MODEL),EVAL_ANALYST_MODEL=$(ANALYST_MODEL)) \
+            $(if $(SUMMARY_MODEL),EVAL_SUMMARY_MODEL=$(SUMMARY_MODEL))
+
+eval-prepare:
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) prepare.py $(PREPARE_ARGS)
+
+eval-run: eval-prepare
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) run.py $(RUN_ARGS) $(EVAL_ARGS)
+
+eval-grade:
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) grade.py $(GRADE_ARGS)
+
+eval-report:
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) report.py $(REPORT_ARGS)
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) analyze.py $(REPORT_ARGS)
+	cd $(EVAL_DIR) && $(PY) visualise.py
+
+# The page is the fastest way to understand a sweep; it needs no model and
+# no network, so it is its own target and safe to re-run at any time.
+eval-view:
+	cd $(EVAL_DIR) && $(PY) visualise.py --open
+
+eval-pilot: eval-run eval-grade eval-report
+
+# One cell, end to end. The debugging loop: cheapest way to prove the whole
+# pipeline still works after a change.
+#   make eval-one RUN=q03__smritikosh_tuned__r1
+RUN ?= q08__bare__r1
+eval-one: eval-prepare
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) run.py --only $(RUN)
+	cd $(EVAL_DIR) && $(EVAL_ENV) $(PY) grade.py --only $(RUN) --redo
+
+# Worktrees are registered with git, so removing the directory is not enough.
+eval-clean:
+	-git worktree list --porcelain | awk '/^worktree .*evals\/.worktrees/ {print $$2}' \
+	    | xargs -r -n1 git worktree remove --force
+	rm -rf evals/runs evals/results evals/.worktrees
 
 # ── Pre-commit ────────────────────────────────────────────────────────────────
 

@@ -97,6 +97,13 @@ dev = [
     "duckdb>=1.0",
 ]
 
+# The agent eval harness (evals/). Its own group because the harness is not
+# needed to develop or test the package, and nothing under smritikosh/ may
+# import it.
+evals = [
+    "pyyaml>=6.0",
+]
+
 # Both Mac architectures are supported, so the lock file must carry a
 # resolution for each. uv otherwise resolves only for the machine that ran
 # `uv lock`, which silently drops the other one: an Intel-only lock pins

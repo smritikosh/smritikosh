@@ -1,0 +1,142 @@
+# Pilot golden set: smritikosh answering questions about its own source.
+#
+# Every key fact and gold range was verified against `commit`. Arms run in a
+# worktree checked out at that commit, which predates evals/, so the answers
+# here can never leak into an index or a grep. Re-verify every range before
+# moving `commit`.
+#
+# Grading: coverage = (covered + 0.5 * partial) / len(key_facts), judged per
+# fact with a verbatim quote from the answer. citation_hit is true when any
+# PATH:START-END in the answer overlaps a gold range.
+
+commit: 7b34092
+questions:
+
+- id: q01
+  category: locate
+  question: >
+    When dense and keyword search results are merged, what constant controls
+    the merge, what is its default, and what happens if it is set to 0?
+  key_facts:
+    - Merge is Reciprocal Rank Fusion in fuse_ranked_results (smritikosh/retrieval/fusion.py)
+    - Default rrf_k is 60
+    - rrf_k <= 0 raises ValueError("rrf_k must be positive")
+    - Each hit contributes 1 / (rrf_k + rank), summed across facets and channels
+    - Only ranks <= 10 count a facet as covered (_FACET_COVERAGE_RANK = 10)
+  gold_citations:
+    - {path: smritikosh/retrieval/fusion.py, start: 76, end: 107}
+    - {path: smritikosh/retrieval/fusion.py, start: 17, end: 17}
+
+- id: q02
+  category: config
+  question: >
+    After results are fused, which kinds of files get boosted or demoted in
+    search ranking, by how much, and when is the demotion skipped?
+  key_facts:
+    - apply_metadata_priors runs after RRF (smritikosh/retrieval/priors.py), called from retrieval/service.py
+    - Topic-path matches are boosted x1.25
+    - Docs (.md/.mdx/.rst, docs/, README) are penalised x0.75 unless the facet has documentation intent
+    - Migration paths are penalised x0.85 unless the facet mentions migration/schema
+    - Test paths are penalised x0.9 unless the facet has test intent
+    - Defaults live on HybridSearchOptions in smritikosh/models/retrieval.py
+  gold_citations:
+    - {path: smritikosh/retrieval/priors.py, start: 48, end: 93}
+    - {path: smritikosh/models/retrieval.py, start: 131, end: 134}
+
+- id: q03
+  category: explain_flow
+  question: >
+    If I re-run `smritikosh index` on a repo where nothing changed, why does it
+    not re-embed every file? Explain the mechanism and where its state lives.
+  key_facts:
+    - process_file is decorated @sm.memoized
+    - Cache key is sha256 of logic fingerprint | input fingerprint | context fingerprint
+    - On a hit the cached result is returned without running the function
+    - The cache is the DuckDB memo_cache table (MemoizationStore in engine/_memo.py)
+    - The file hash is written last, so a crash mid-file forces a redo next run
+  gold_citations:
+    - {path: smritikosh/indexing/pipeline/_pipeline.py, start: 91, end: 123}
+    - {path: smritikosh/engine/_decorators.py, start: 56, end: 82}
+    - {path: smritikosh/engine/_memo.py, start: 23, end: 55}
+
+- id: q04
+  category: explain_flow
+  question: >
+    What happens to a function or section that is too big for the embedder's
+    budget? Describe the splitting rules, including edge cases.
+  key_facts:
+    - split_oversized in smritikosh/indexing/strategies/_helpers.py
+    - Text under budget comes back as a single window
+    - Splits on whole lines only, never mid-line
+    - Consecutive windows overlap by 2 lines (_OVERLAP_LINES = 2)
+    - A single line longer than the budget is emitted as its own window
+    - A trailing fragment under 80 chars (_MIN_CHUNK_CHARS) merges into the previous window only if the result still fits
+  gold_citations:
+    - {path: smritikosh/indexing/strategies/_helpers.py, start: 55, end: 109}
+    - {path: smritikosh/indexing/strategies/_helpers.py, start: 23, end: 23}
+    - {path: smritikosh/indexing/strategies/_helpers.py, start: 42, end: 42}
+
+- id: q05
+  category: impact
+  question: >
+    Which production code paths call build_index, and what would break if the
+    full-rebuild path stopped clearing the incremental caches?
+  key_facts:
+    - Called via cli._build_index_with_progress
+    - Reached from the `index` command and from the watch loop (dispatched to a worker thread)
+    - full (or a changed lexical schema) clears caches, nodes, vectors and lexical postings
+    - Without clearing caches every unchanged file is a memo hit, so the rebuild writes nothing and the index ends up empty
+    - Pinned by test_build_index_full_repopulates_what_it_cleared
+  gold_citations:
+    - {path: smritikosh/cli.py, start: 45, end: 84}
+    - {path: smritikosh/cli.py, start: 87, end: 115}
+    - {path: smritikosh/indexing/pipeline/_pipeline.py, start: 249, end: 260}
+    - {path: tests/indexing/test_pipeline.py, start: 394, end: 420}
+
+- id: q06
+  category: cross_file
+  question: >
+    In `smritikosh explore chunks`, can I pass --range together with a file
+    path argument? What if START is greater than END? Are old flags like
+    --json-output still accepted?
+  key_facts:
+    - --range takes PATH START END and is repeatable
+    - Combining --range with PATH, --start-line/--end-line or --full raises a UsageError
+    - START > END raises BadParameter "START cannot be greater than END"
+    - --toon / --json-output are hidden, accepted and ignored for older agent prompts
+  gold_citations:
+    - {path: smritikosh/exploration_cli.py, start: 370, end: 449}
+
+- id: q07
+  category: docs_and_code
+  question: >
+    Walk through the search pipeline from a question to the evidence pack
+    returned to an agent, and map each documented stage to the code that
+    implements it.
+  key_facts:
+    - The question is split into focused facets, and each searches the dense and BM25 indexes (HybridRetriever)
+    - Ranks combine with RRF (fusion.py)
+    - Metadata priors adjust scores after fusion (service.py -> priors.py)
+    - select_seeds reserves one seed per facet, then applies MMR (mmr_lambda) for relevance vs. redundancy (retrieval/selection.py)
+    - Results come back as path plus start/end line ranges, not file bodies
+    - README notes there is no cross-encoder or LLM verification stage
+  gold_citations:
+    - {path: README.md, start: 179, end: 193}
+    - {path: smritikosh/retrieval/hybrid.py, start: 18, end: 50}
+    - {path: smritikosh/retrieval/selection.py, start: 38, end: 119}
+    - {path: smritikosh/retrieval/service.py, start: 83, end: 83}
+
+- id: q08
+  category: negative
+  question: >
+    How does smritikosh chunk Go source files?
+  key_facts:
+    - Go is not supported; no .go extension is registered
+    # Quoted because an unquoted "word: value" is a YAML mapping, not a
+    # string. Unquoted, this fact reached the judge as a Python dict repr,
+    # complete with braces, and was graded against that. The loader now
+    # rejects non-string facts outright so it cannot recur silently.
+    - "Supported: .py .ts .tsx .js .jsx .java .kt .kts (AST), .md .mdx .json (sections), .toml"
+    - Adding a language is one register_extension() call in indexing/pipeline/_router.py
+  gold_citations:
+    - {path: smritikosh/indexing/pipeline/_router.py, start: 37, end: 48}
