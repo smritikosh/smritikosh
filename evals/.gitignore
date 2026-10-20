@@ -1,0 +1,5 @@
+# Everything an eval produces is reproducible from golden/ + arms/, and a run
+# tree is tens of megabytes of session JSONL. Keep the inputs, drop the output.
+runs/
+results/
+.worktrees/

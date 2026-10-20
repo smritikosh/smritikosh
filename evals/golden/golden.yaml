@@ -132,7 +132,11 @@ questions:
     How does smritikosh chunk Go source files?
   key_facts:
     - Go is not supported; no .go extension is registered
-    - Supported: .py .ts .tsx .js .jsx .java .kt .kts (AST), .md .mdx .json (sections), .toml
+    # Quoted because an unquoted "word: value" is a YAML mapping, not a
+    # string. Unquoted, this fact reached the judge as a Python dict repr,
+    # complete with braces, and was graded against that. The loader now
+    # rejects non-string facts outright so it cannot recur silently.
+    - "Supported: .py .ts .tsx .js .jsx .java .kt .kts (AST), .md .mdx .json (sections), .toml"
     - Adding a language is one register_extension() call in indexing/pipeline/_router.py
   gold_citations:
     - {path: smritikosh/indexing/pipeline/_router.py, start: 37, end: 48}
