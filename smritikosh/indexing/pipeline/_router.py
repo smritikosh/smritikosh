@@ -46,4 +46,6 @@ def _build_router(
     router.register_extension(".mdx", "markdown", sections)
     router.register_extension(".toml", "toml", toml, has_tags_scm=False)
     router.register_extension(".json", "json", sections)
+    router.register_extension(".yaml", "yaml", sections)
+    router.register_extension(".yml", "yaml", sections)
     return router

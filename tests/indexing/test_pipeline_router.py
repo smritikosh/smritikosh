@@ -32,7 +32,7 @@ def test_same_instance_returned_on_repeated_calls() -> None:
     assert _build_router() is _build_router()
 
 
-# ── All 12 extensions registered ──────────────────────────────────────────────
+# ── Every registered extension ────────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
@@ -50,6 +50,8 @@ def test_same_instance_returned_on_repeated_calls() -> None:
         "guide.mdx",
         "pyproject.toml",
         "config.json",
+        "deploy/app.yaml",
+        "deploy/app.yml",
     ],
 )
 def test_known_extension_is_routed(path: str) -> None:
@@ -61,6 +63,13 @@ def test_unknown_extension_returns_none() -> None:
 
 
 # ── TOML has no tags.scm ──────────────────────────────────────────────────────
+
+
+def test_yaml_has_tags_scm_true() -> None:
+    config = _build_router().route("deploy/app.yaml")
+    assert config is not None
+    assert config.language == "yaml"
+    assert config.has_tags_scm is True
 
 
 def test_toml_has_tags_scm_false() -> None:
