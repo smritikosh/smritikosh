@@ -20,8 +20,9 @@ from smritikosh.engine import (
     use_context,
 )
 from smritikosh.indexing.discovery import iter_source_files
+from smritikosh.indexing.graph import resolve
 from smritikosh.indexing.pipeline._router import _build_router
-from smritikosh.indexing.pipeline._stages import _chunk, _extract, _parse
+from smritikosh.indexing.pipeline._stages import _chunk, _extract, _graph, _parse
 from smritikosh.indexing.strategies._helpers import budget_chars
 from smritikosh.models import Chunk, SourceFile
 from smritikosh.ports.embedder import Embedder
@@ -99,6 +100,7 @@ async def process_file(source: SourceFile) -> None:
     parsed = await _parse(source)
     captures = await _extract(parsed, source.has_tags_scm)
     chunks = await _chunk(parsed, captures, source.strategy)
+    graph = await _graph(parsed, captures)
     new_ids = {c.id for c in chunks}
 
     for stale_id in old_ids - new_ids:
@@ -108,6 +110,7 @@ async def process_file(source: SourceFile) -> None:
 
     storage.upsert_file_node(source)
     storage.upsert_chunk_nodes(chunks)
+    storage.replace_graph(source.path, *graph)
     lexical_store.upsert(chunks)
 
     embedded = await sm.gather(process_chunk, chunks)
@@ -174,6 +177,7 @@ async def _run_pipeline(
         concurrency=file_concurrency,
         item_done=_item_done,
     )
+    storage.replace_edges(resolve(storage.get_all_file_paths(), *storage.load_graph()))
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

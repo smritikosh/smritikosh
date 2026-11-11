@@ -12,6 +12,11 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Added
+
+- `explore impact NAME` lists the callers or callees of a Python definition, with
+  the lines each call is made on. `--depth` follows them further.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added

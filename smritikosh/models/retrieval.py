@@ -10,6 +10,7 @@ from smritikosh.models.types import SearchResult
 __all__ = [
     "CandidateScore",
     "HybridSearchOptions",
+    "ImpactRow",
     "IndexInfo",
     "IndexedChunk",
     "OutlineEntry",
@@ -72,6 +73,18 @@ class OutlineEntry:
 
     symbol: str | None
     chunk_kind: str | None
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True)
+class ImpactRow:
+    """One caller or callee reached from a symbol, and where the call is made."""
+
+    depth: int
+    symbol: str
+    call_path: str
+    call_lines: tuple[int, ...]
     start_line: int
     end_line: int
 

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from smritikosh.models import (
+    ImpactRow,
     IndexedChunk,
     IndexInfo,
     OutlineEntry,
     SearchOptions,
     SearchResult,
     SourceLine,
+    Symbol,
     TextMatch,
 )
 
@@ -125,3 +127,24 @@ class SourceReader(ABC):
         end_line: int | None = None,
     ) -> list[SourceLine]:
         """Rebuild the source of one path from its chunks, line by line."""
+
+    # ---------------------------------------------------------------- graph
+
+    @abstractmethod
+    def find_symbols(self, name: str, *, limit: int = 20) -> list[Symbol]:
+        """Find definitions by id, qualified name, or a trailing part of it."""
+
+    @abstractmethod
+    def impact(
+        self,
+        symbol_id: str,
+        *,
+        direction: Literal["in", "out"] = "in",
+        depth: int = 1,
+        limit: int = 200,
+    ) -> list[ImpactRow]:
+        """Walk call edges into (callers) or out of (callees) a symbol."""
+
+    @abstractmethod
+    def unresolved_calls(self, symbol_id: str) -> int:
+        """Count calls with the symbol's name that resolved to nothing."""

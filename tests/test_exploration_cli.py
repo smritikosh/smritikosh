@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import toons
-from click.testing import CliRunner
+from click.testing import CliRunner, Result
 
 from smritikosh.cli import main
 from smritikosh.exploration import (
@@ -15,7 +15,7 @@ from smritikosh.exploration import (
     SourceLine,
 )
 from smritikosh.exploration_cli import explore
-from smritikosh.models import SearchLocation, SearchResult
+from smritikosh.models import ImpactRow, SearchLocation, SearchResult, Symbol
 
 LEGACY_COMMANDS = ("evidence", "text", "paths", "info", "batch", "discover")
 
@@ -44,7 +44,7 @@ def test_should_expose_tools_search_and_chunks() -> None:
 
     # Assert
     assert result.exit_code == 0
-    assert sorted(explore.commands) == ["chunks", "search", "tools"]
+    assert sorted(explore.commands) == ["chunks", "impact", "search", "tools"]
     assert "tools" in result.output
     assert "search" in result.output
     assert "chunks" in result.output
@@ -69,6 +69,7 @@ def test_should_list_agent_facing_tool_usage_as_toon() -> None:
         "search",
         "chunks",
         "chunks",
+        "impact",
     ]
     assert (
         payload["tools"][0]["usage"] == "smritikosh explore search QUERY... "
@@ -141,6 +142,7 @@ def test_should_include_agent_guidance_in_tools_prose() -> None:
     assert "Treat search results as candidates" in result.output
     assert "Read relevant implementation and test bodies." in result.output
     assert "portfolio-relative PATH:START-END" in result.output
+    assert "smritikosh explore impact NAME" in result.output
 
 
 def test_should_reject_every_removed_exploration_command(tmp_path: Path) -> None:
@@ -827,3 +829,171 @@ def test_should_read_multiple_source_ranges_with_one_chunks_command(
     assert result.exit_code == 0
     assert explorer.get_source_lines.call_count == 2
     assert result.output == ("src/a.py:1-1\n1  first\n\nsrc/b.py:7-7\n7  second\n")
+
+
+_RUN = Symbol("app/service.py:run", "run", "function", "app/service.py", 4, 6, None)
+_HELPER = Symbol("app/util.py:helper", "helper", "function", "app/util.py", 1, 2, None)
+_BOX_HELPER = Symbol(
+    "app/other.py:Box.helper",
+    "helper",
+    "method",
+    "app/other.py",
+    2,
+    3,
+    "app/other.py:Box",
+)
+
+
+def _run_impact(tmp_path: Path, explorer: MagicMock, *args: str) -> Result:
+    db_path: Path = tmp_path / "index.duckdb"
+    db_path.touch()
+    with patch("smritikosh.exploration_cli.DuckDBSourceReader", return_value=explorer):
+        return CliRunner().invoke(
+            main, ["explore", "impact", *args, "--db-path", str(db_path)]
+        )
+
+
+def test_should_list_callers_as_toon(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_HELPER]
+    explorer.impact.return_value = [
+        ImpactRow(1, "app/service.py:run", "app/service.py", (5, 6), 4, 6)
+    ]
+    explorer.unresolved_calls.return_value = 1
+
+    result = _run_impact(tmp_path, explorer, "helper")
+
+    assert result.exit_code == 0, result.output
+    assert toons.loads(result.output) == {
+        "target": {
+            "symbol": "app/util.py:helper",
+            "start_line": 1,
+            "end_line": 2,
+            "direction": "in",
+            "depth": 1,
+        },
+        "impact": [
+            {
+                "depth": 1,
+                "symbol": "app/service.py:run",
+                "call_path": "app/service.py",
+                "call_lines": "5|6",
+                "start_line": 4,
+                "end_line": 6,
+            }
+        ],
+        "unresolved": 1,
+        "truncated": False,
+    }
+    explorer.impact.assert_called_once_with(
+        "app/util.py:helper", direction="in", depth=1, limit=201
+    )
+
+
+def test_should_list_callees_without_an_unresolved_count(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_RUN]
+    explorer.impact.return_value = []
+
+    result = _run_impact(
+        tmp_path, explorer, "run", "--direction", "out", "--depth", "9"
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = toons.loads(result.output)
+    assert "unresolved" not in payload
+    assert payload["target"]["depth"] == 5
+    explorer.unresolved_calls.assert_not_called()
+
+
+def test_should_print_callers_as_prose(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_HELPER]
+    explorer.impact.return_value = [
+        ImpactRow(1, "app/service.py:run", "app/service.py", (5, 6), 4, 6)
+    ]
+    explorer.unresolved_calls.return_value = 2
+
+    result = _run_impact(tmp_path, explorer, "helper", "--prose")
+
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "app/util.py:helper  1-2  (callers, depth 1)",
+        "  1  app/service.py:5,6  app/service.py:run  4-6",
+        "2 calls named helper could not be resolved.",
+    ]
+
+
+def test_should_say_when_nothing_calls_a_symbol(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_RUN]
+    explorer.impact.return_value = []
+    explorer.unresolved_calls.return_value = 0
+
+    result = _run_impact(tmp_path, explorer, "run", "--prose")
+
+    assert result.output.splitlines()[1] == "No callers found."
+
+
+def test_should_mark_capped_impact_rows(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_HELPER]
+    explorer.impact.return_value = [
+        ImpactRow(1, f"app/m{i}.py:f", f"app/m{i}.py", (1,), 1, 2) for i in range(201)
+    ]
+    explorer.unresolved_calls.return_value = 0
+
+    payload = toons.loads(_run_impact(tmp_path, explorer, "helper").output)
+
+    assert len(payload["impact"]) == 200
+    assert payload["truncated"] is True
+
+
+def test_should_list_candidates_for_an_ambiguous_name(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_BOX_HELPER, _HELPER]
+
+    result = _run_impact(tmp_path, explorer, "helper", "--prose")
+
+    assert result.output.splitlines() == [
+        "helper matches more than one symbol; pass one of these ids:",
+        "  app/other.py:Box.helper  2-3",
+        "  app/util.py:helper  1-2",
+    ]
+    explorer.impact.assert_not_called()
+
+
+def test_should_list_candidates_as_toon(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = [_BOX_HELPER, _HELPER]
+
+    payload = toons.loads(_run_impact(tmp_path, explorer, "helper").output)
+
+    assert payload == {
+        "matches": [
+            {"symbol": "app/other.py:Box.helper", "start_line": 2, "end_line": 3},
+            {"symbol": "app/util.py:helper", "start_line": 1, "end_line": 2},
+        ]
+    }
+
+
+def test_should_say_when_no_symbol_matches(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.return_value = []
+
+    result = _run_impact(tmp_path, explorer, "missing")
+
+    assert result.exit_code != 0
+    assert "No symbol named missing." in result.output
+
+
+def test_should_ask_for_a_reindex_without_a_call_graph(tmp_path: Path) -> None:
+    explorer = _mock_explorer()
+    explorer.find_symbols.side_effect = RuntimeError(
+        "This index has no call graph yet."
+    )
+
+    result = _run_impact(tmp_path, explorer, "helper")
+
+    assert result.exit_code != 0
+    assert "no call graph" in result.output

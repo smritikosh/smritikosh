@@ -1,17 +1,20 @@
-"""DuckDB storage adapter — nodes and file_hashes tables in one .duckdb file."""
+"""DuckDB storage adapter — nodes, file_hashes and call graph in one .duckdb file."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import astuple
 
 import duckdb
 
 from smritikosh.constants import DEFAULT_DB_PATH
-from smritikosh.models import Chunk, SourceFile
+from smritikosh.models import Call, Chunk, Edge, Import, SourceFile, Symbol
 from smritikosh.ports.storage import StorageAdapter
 
 __all__ = ["DuckDBAdapter"]
+
+_GRAPH_TABLES = ("symbols", "calls", "imports")
 
 
 class DuckDBAdapter(StorageAdapter):
@@ -53,6 +56,50 @@ class DuckDBAdapter(StorageAdapter):
                 path       TEXT PRIMARY KEY,
                 hash       TEXT NOT NULL,
                 indexed_at TIMESTAMP DEFAULT now()
+            )
+            """
+        )
+        self.con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS symbols (
+                id         TEXT PRIMARY KEY,
+                name       TEXT NOT NULL,
+                kind       TEXT NOT NULL,
+                path       TEXT NOT NULL,
+                start_line INTEGER NOT NULL,
+                end_line   INTEGER NOT NULL,
+                parent     TEXT
+            )
+            """
+        )
+        self.con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS calls (
+                path     TEXT NOT NULL,
+                scope    TEXT NOT NULL,
+                receiver TEXT,
+                name     TEXT NOT NULL,
+                line     INTEGER NOT NULL
+            )
+            """
+        )
+        self.con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS imports (
+                path   TEXT NOT NULL,
+                module TEXT NOT NULL,
+                name   TEXT,
+                alias  TEXT
+            )
+            """
+        )
+        self.con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS edges (
+                src  TEXT NOT NULL,
+                dst  TEXT NOT NULL,
+                path TEXT NOT NULL,
+                line INTEGER NOT NULL
             )
             """
         )
@@ -163,11 +210,68 @@ class DuckDBAdapter(StorageAdapter):
         )
 
     def delete_file(self, path: str) -> None:
-        """Atomically remove all nodes and the file_hash row for *path*."""
+        """Atomically remove all nodes, graph rows and the file_hash for *path*."""
         self.con.begin()
         try:
-            self.con.execute("DELETE FROM nodes WHERE path = ?", [path])
-            self.con.execute("DELETE FROM file_hashes WHERE path = ?", [path])
+            for table in ("nodes", "file_hashes", *_GRAPH_TABLES):
+                self.con.execute(f"DELETE FROM {table} WHERE path = ?", [path])  # noqa: S608
+            self.con.commit()
+        except Exception:
+            self.con.rollback()
+            raise
+
+    # ------------------------------------------------------------------ graph
+
+    def replace_graph(
+        self,
+        path: str,
+        symbols: list[Symbol],
+        calls: list[Call],
+        imports: list[Import],
+    ) -> None:
+        self.con.begin()
+        try:
+            for table in _GRAPH_TABLES:
+                self.con.execute(f"DELETE FROM {table} WHERE path = ?", [path])  # noqa: S608
+            if symbols:
+                self.con.executemany(
+                    "INSERT INTO symbols VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [astuple(s) for s in symbols],
+                )
+            if calls:
+                self.con.executemany(
+                    "INSERT INTO calls VALUES (?, ?, ?, ?, ?)",
+                    [astuple(c) for c in calls],
+                )
+            if imports:
+                self.con.executemany(
+                    "INSERT INTO imports VALUES (?, ?, ?, ?)",
+                    [astuple(i) for i in imports],
+                )
+            self.con.commit()
+        except Exception:
+            self.con.rollback()
+            raise
+
+    def load_graph(self) -> tuple[list[Symbol], list[Call], list[Import]]:
+        return (
+            [Symbol(*row) for row in self._rows("symbols")],
+            [Call(*row) for row in self._rows("calls")],
+            [Import(*row) for row in self._rows("imports")],
+        )
+
+    def _rows(self, table: str) -> list[tuple]:
+        return self.con.execute(f"SELECT * FROM {table}").fetchall()  # noqa: S608
+
+    def replace_edges(self, edges: list[Edge]) -> None:
+        self.con.begin()
+        try:
+            self.con.execute("DELETE FROM edges")
+            if edges:
+                self.con.executemany(
+                    "INSERT INTO edges VALUES (?, ?, ?, ?)",
+                    [astuple(e) for e in edges],
+                )
             self.con.commit()
         except Exception:
             self.con.rollback()
@@ -194,10 +298,11 @@ class DuckDBAdapter(StorageAdapter):
             raise
 
     def clear_nodes(self) -> None:
-        """Remove all indexed source nodes."""
+        """Remove all indexed source nodes and the call graph."""
         self.con.begin()
         try:
-            self.con.execute("DELETE FROM nodes")
+            for table in ("nodes", *_GRAPH_TABLES, "edges"):
+                self.con.execute(f"DELETE FROM {table}")  # noqa: S608
             self.con.commit()
         except Exception:
             self.con.rollback()

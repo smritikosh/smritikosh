@@ -14,8 +14,18 @@ from __future__ import annotations
 from smritikosh.engine import sm
 from smritikosh.indexing.chunker import chunk_file
 from smritikosh.indexing.extractor import extract_file
+from smritikosh.indexing.graph import graph_file
 from smritikosh.indexing.parser import parse_file
-from smritikosh.models import Capture, Chunk, ChunkingStrategy, ParsedFile, SourceFile
+from smritikosh.models import (
+    Call,
+    Capture,
+    Chunk,
+    ChunkingStrategy,
+    Import,
+    ParsedFile,
+    SourceFile,
+    Symbol,
+)
 
 
 @sm.threaded
@@ -38,3 +48,10 @@ def _chunk(
 ) -> list[Chunk]:
     """Wrap chunk_file in asyncio.to_thread — AST traversal on a thread."""
     return chunk_file(parsed, captures, strategy)
+
+
+@sm.threaded
+def _graph(
+    parsed: ParsedFile, captures: list[Capture]
+) -> tuple[list[Symbol], list[Call], list[Import]]:
+    return graph_file(parsed, captures)

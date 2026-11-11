@@ -41,6 +41,31 @@ class Symbol:
 
 
 @dataclass
+class Call:
+    path: str
+    scope: str
+    receiver: str | None
+    name: str
+    line: int
+
+
+@dataclass
+class Import:
+    path: str
+    module: str
+    name: str | None
+    alias: str | None
+
+
+@dataclass
+class Edge:
+    src: str
+    dst: str
+    path: str
+    line: int
+
+
+@dataclass
 class ParsedFile:
     """A parsed source file and its tree-sitter tree."""
 

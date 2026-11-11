@@ -21,7 +21,7 @@ from smritikosh.exploration import (
     ReadOnlyExplorer,
     SourceLine,
 )
-from smritikosh.models import HybridSearchOptions, SearchLocation
+from smritikosh.models import HybridSearchOptions, ImpactRow, SearchLocation, Symbol
 from smritikosh.ports.embedder import Embedder
 from smritikosh.retrieval.service import HybridSearchService
 
@@ -29,6 +29,7 @@ __all__ = ["explore"]
 
 MAX_QUERIES = 8
 MAX_QUERY_CHARS = 500
+MAX_IMPACT_ROWS = 200
 
 
 def _echo_toon(value: object) -> None:
@@ -122,6 +123,88 @@ def _echo_search_prose(
         )
 
 
+def _echo_matches(name: str, matches: list[Symbol], *, prose: bool) -> None:
+    if not prose:
+        _echo_toon(
+            {
+                "matches": [
+                    {
+                        "symbol": symbol.id,
+                        "start_line": symbol.start_line,
+                        "end_line": symbol.end_line,
+                    }
+                    for symbol in matches
+                ]
+            }
+        )
+        return
+    click.echo(f"{name} matches more than one symbol; pass one of these ids:")
+    for symbol in matches:
+        click.echo(f"  {symbol.id}  {symbol.start_line}-{symbol.end_line}")
+
+
+def _impact_payload(
+    target: Symbol,
+    rows: list[ImpactRow],
+    *,
+    direction: str,
+    depth: int,
+    unresolved: int | None,
+    truncated: bool,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "target": {
+            "symbol": target.id,
+            "start_line": target.start_line,
+            "end_line": target.end_line,
+            "direction": direction,
+            "depth": depth,
+        },
+        "impact": [
+            {
+                "depth": row.depth,
+                "symbol": row.symbol,
+                "call_path": row.call_path,
+                "call_lines": "|".join(str(line) for line in row.call_lines),
+                "start_line": row.start_line,
+                "end_line": row.end_line,
+            }
+            for row in rows
+        ],
+    }
+    if unresolved is not None:
+        payload["unresolved"] = unresolved
+    payload["truncated"] = truncated
+    return payload
+
+
+def _echo_impact_prose(
+    target: Symbol,
+    rows: list[ImpactRow],
+    *,
+    direction: str,
+    depth: int,
+    unresolved: int | None,
+    truncated: bool,
+) -> None:
+    label: str = "callers" if direction == "in" else "callees"
+    click.echo(
+        f"{target.id}  {target.start_line}-{target.end_line}  ({label}, depth {depth})"
+    )
+    if not rows:
+        click.echo(f"No {label} found.")
+    for row in rows:
+        lines: str = ",".join(str(line) for line in row.call_lines)
+        click.echo(
+            f"  {row.depth}  {row.call_path}:{lines}  "
+            f"{row.symbol}  {row.start_line}-{row.end_line}"
+        )
+    if truncated:
+        click.echo(f"Showing the first {MAX_IMPACT_ROWS} rows.")
+    if unresolved:
+        click.echo(f"{unresolved} calls named {target.name} could not be resolved.")
+
+
 def _tools_payload() -> dict[str, object]:
     """Describe the exploration workflow in compact, machine-readable rows."""
     return {
@@ -167,6 +250,17 @@ def _tools_payload() -> dict[str, object]:
                 "purpose": "List indexed definitions in one file.",
                 "usage": ("smritikosh explore chunks PATH [--db-path PATH]"),
                 "returns": "TOON outline rows with symbols and line ranges",
+            },
+            {
+                "name": "impact",
+                "purpose": "List callers or callees of a Python definition.",
+                "usage": (
+                    "smritikosh explore impact NAME [--direction in|out] "
+                    "[--depth N] [--db-path PATH]"
+                ),
+                "returns": (
+                    "TOON rows: depth,symbol,call_path,call_lines,start_line,end_line"
+                ),
             },
         ],
         "search_standards": [
@@ -242,6 +336,12 @@ def _echo_tools_prose() -> None:
         "[--range PATH START END ...] [--db-path PATH]"
     )
     click.echo("3. Cite the returned PATH:START-END evidence.")
+    click.echo()
+    click.echo("List the callers (in) or callees (out) of a Python definition:")
+    click.echo(
+        "   smritikosh explore impact NAME [--direction in|out] [--depth N] "
+        "[--db-path PATH]"
+    )
     click.echo()
     click.echo("Agent guidance:")
     for instruction in _tools_payload()["agent_guidance"]:
@@ -477,3 +577,80 @@ def get_chunks(
         _echo_toon([asdict(entry) for entry in entries])
         return
     _echo_outline(entries, path=path)
+
+
+@explore.command("impact")
+@click.argument("name")
+@click.option(
+    "--direction",
+    type=click.Choice(["in", "out"]),
+    default="in",
+    show_default=True,
+    help="in lists callers, out lists callees.",
+)
+@click.option(
+    "--depth",
+    default=1,
+    show_default=True,
+    type=click.IntRange(min=1, max=5, clamp=True),
+)
+@click.option(
+    "--db-path",
+    "--db_path",
+    default=DEFAULT_DB_PATH,
+    show_default=True,
+    type=click.Path(exists=True, dir_okay=False),
+)
+@click.option(
+    "--prose",
+    is_flag=True,
+    help="Print prose for a human instead of the default TOON rows.",
+)
+def impact(name: str, direction: str, depth: int, db_path: str, prose: bool) -> None:
+    """List the callers or callees of a Python definition.
+
+    NAME is a symbol id (path:Class.method), a qualified name (Class.method),
+    or a bare name. When several definitions match, they are listed instead.
+    """
+    try:
+        with DuckDBSourceReader(db_path) as reader:
+            matches: list[Symbol] = reader.find_symbols(name)
+            if not matches:
+                raise click.ClickException(f"No symbol named {name}.")
+            if len(matches) > 1:
+                _echo_matches(name, matches, prose=prose)
+                return
+            target: Symbol = matches[0]
+            rows: list[ImpactRow] = reader.impact(
+                target.id,
+                direction=direction,
+                depth=depth,
+                limit=MAX_IMPACT_ROWS + 1,
+            )
+            unresolved: int | None = (
+                reader.unresolved_calls(target.id) if direction == "in" else None
+            )
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
+    truncated: bool = len(rows) > MAX_IMPACT_ROWS
+    rows = rows[:MAX_IMPACT_ROWS]
+    if prose:
+        _echo_impact_prose(
+            target,
+            rows,
+            direction=direction,
+            depth=depth,
+            unresolved=unresolved,
+            truncated=truncated,
+        )
+        return
+    _echo_toon(
+        _impact_payload(
+            target,
+            rows,
+            direction=direction,
+            depth=depth,
+            unresolved=unresolved,
+            truncated=truncated,
+        )
+    )

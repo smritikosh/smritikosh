@@ -108,6 +108,13 @@ class _Storage:
     def get_chunks_by_ids(self, chunk_ids: list[str]) -> list[dict[str, Any]]:
         return []
 
+    def replace_graph(self, path, symbols, calls, imports) -> None: ...
+
+    def load_graph(self):
+        return [], [], []
+
+    def replace_edges(self, edges) -> None: ...
+
 
 class _LexicalStore:
     def __init__(self) -> None:
@@ -474,6 +481,45 @@ def test_build_index_drops_the_vectors_of_a_deleted_source_file(
     assert storage.get_chunk_ids_for_file("gone.py") == set()
     assert not any(vs.exists(chunk_id) for chunk_id in gone_ids)
     assert storage.get_chunk_ids_for_file("keep.py"), "surviving file was collateral"
+
+
+def _edges(con: duckdb.DuckDBPyConnection) -> set[tuple[str, str]]:
+    return set(con.execute("SELECT src, dst FROM edges").fetchall())
+
+
+def test_build_index_re_resolves_calls_from_unchanged_files(tmp_path: Path) -> None:
+    """app.py is a memo hit on the second run; its stored calls still resolve again."""
+    (tmp_path / "util.py").write_text("def helper(): pass\n")
+    (tmp_path / "app.py").write_text(
+        "from util import helper\n\ndef run():\n    helper()\n"
+    )
+    con = duckdb.connect(":memory:")
+    storage = DuckDBAdapter(con=con)
+    vs = DuckDBVectorStore(con=con)
+
+    build_index(str(tmp_path), embedder=_Embedder(), storage=storage, vector_store=vs)
+    assert _edges(con) == {("app.py:run", "util.py:helper")}
+
+    (tmp_path / "util.py").write_text("def assist(): pass\n")
+    build_index(str(tmp_path), embedder=_Embedder(), storage=storage, vector_store=vs)
+    assert _edges(con) == set()
+
+
+def test_build_index_drops_edges_of_a_deleted_file(tmp_path: Path) -> None:
+    (tmp_path / "util.py").write_text("def helper(): pass\n")
+    (tmp_path / "app.py").write_text(
+        "from util import helper\n\ndef run():\n    helper()\n"
+    )
+    con = duckdb.connect(":memory:")
+    storage = DuckDBAdapter(con=con)
+    vs = DuckDBVectorStore(con=con)
+    build_index(str(tmp_path), embedder=_Embedder(), storage=storage, vector_store=vs)
+
+    (tmp_path / "app.py").unlink()
+    build_index(str(tmp_path), embedder=_Embedder(), storage=storage, vector_store=vs)
+
+    assert _edges(con) == set()
+    assert {s.path for s in storage.load_graph()[0]} == {"util.py"}
 
 
 def test_build_index_reports_every_file_to_the_callback(tmp_path: Path) -> None:

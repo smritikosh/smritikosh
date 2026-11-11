@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from smritikosh.models import Chunk, SourceFile
+from smritikosh.models import Call, Chunk, Edge, Import, SourceFile, Symbol
 
 __all__ = ["StorageAdapter"]
 
@@ -54,13 +54,33 @@ class StorageAdapter(ABC):
 
     @abstractmethod
     def delete_file(self, path: str) -> None:
-        """Atomically remove all nodes and the file_hash for *path*."""
+        """Atomically remove all nodes, graph rows and the file_hash for *path*."""
+
+    # ------------------------------------------------------------------ graph
+
+    @abstractmethod
+    def replace_graph(
+        self,
+        path: str,
+        symbols: list[Symbol],
+        calls: list[Call],
+        imports: list[Import],
+    ) -> None:
+        """Replace the symbols, calls and imports recorded for *path*."""
+
+    @abstractmethod
+    def load_graph(self) -> tuple[list[Symbol], list[Call], list[Import]]:
+        """Return every stored symbol, call and import."""
+
+    @abstractmethod
+    def replace_edges(self, edges: list[Edge]) -> None:
+        """Replace all resolved call edges."""
 
     # ------------------------------------------------------------------ reset
 
     @abstractmethod
     def clear_nodes(self) -> None:
-        """Remove all indexed source nodes."""
+        """Remove all indexed source nodes and the call graph."""
 
     @abstractmethod
     def clear_caches(self) -> None:
