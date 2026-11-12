@@ -81,3 +81,16 @@ jobs:
           fi
 
       - run: uvx --from twine twine check dist/*
+
+  # Proves a Windows install imports and that search will not start the Unix
+  # warm server. The model download stays out of this job.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - run: uv sync --all-groups
+      - run: uv run pytest tests/engine/ tests/models/ tests/ports/ tests/adapters/vector_store/ tests/adapters/file_source/ tests/adapters/storage/ tests/adapters/retrieval/ tests/adapters/embedder/test_make_embedder.py tests/adapters/embedder/test_mps.py tests/adapters/embedder/test_mps_warm.py tests/adapters/embedder/test_query_prefixes.py tests/queries/ tests/indexing/ tests/retrieval/ tests/test_cli.py tests/test_exploration.py tests/test_exploration_cli.py -q --no-cov -m "not slow"

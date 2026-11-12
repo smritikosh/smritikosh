@@ -97,17 +97,19 @@ dev = [
     "duckdb>=1.0",
 ]
 
-# Both Mac architectures are supported, so the lock file must carry a
-# resolution for each. uv otherwise resolves only for the machine that ran
-# `uv lock`, which silently drops the other one: an Intel-only lock pins
-# packages that lack macosx_x86_64 wheels (e.g. onnxruntime >= 1.24), while an
-# arm64-only lock is uninstallable on Intel. Listing both keeps each arch on
-# the newest version it has wheels for — currently onnxruntime 1.23.2 on
-# x86_64 and 1.29.0 on arm64.
+# Mac and Windows installs must all resolve. uv otherwise resolves only for
+# the machine that ran `uv lock`, which silently drops the others: an
+# Intel-only lock pins packages that lack macosx_x86_64 wheels (e.g.
+# onnxruntime >= 1.24), an arm64-only lock is uninstallable on Intel, and a
+# Mac-only lock does not install on Windows. Listing each keeps it on the
+# newest version it has wheels for — currently onnxruntime 1.23.2 on x86_64
+# and a current ONNX build on arm64 and Windows. The Apple GPU packages stay
+# marked darwin/arm64, so Windows resolves the portable ONNX runtime.
 [tool.uv]
 required-environments = [
     "sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
 
 [tool.pytest.ini_options]
