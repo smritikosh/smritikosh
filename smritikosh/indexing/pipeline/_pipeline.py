@@ -28,6 +28,7 @@ from smritikosh.ports.embedder import Embedder
 from smritikosh.ports.retrieval import LexicalStore
 from smritikosh.ports.storage import StorageAdapter
 from smritikosh.ports.vector_store import VectorStore
+from smritikosh.savings import remember_indexed_root
 
 # ── ContextKeys ───────────────────────────────────────────────────────────────
 # detect_change=True on EMBEDDER: swapping the model auto-invalidates all memos.
@@ -273,3 +274,5 @@ def build_index(
                 on_file_indexed=on_file_indexed,
             )
         )
+    if _con is not None:
+        remember_indexed_root(_con, repo_path)

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
 import socket
 import subprocess
 import sys
@@ -20,7 +21,13 @@ from typing import Final
 
 from smritikosh.adapters.embedder.mps import daemon
 
-__all__ = ["encode_via_server", "ensure_server", "stop_server", "warm_enabled"]
+__all__ = [
+    "encode_via_server",
+    "ensure_server",
+    "stop_server",
+    "warm_enabled",
+    "warm_server_label",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +47,29 @@ def warm_enabled() -> bool:
     if setting:
         return setting == "1"
     return not os.environ.get("CI") and hasattr(socket, "AF_UNIX")
+
+
+def warm_server_label() -> str:
+    """Say whether this machine would use the warm server or in-process ONNX.
+
+    Apple silicon reports listening, or off. Every other platform, including
+    Windows, reports in-process ONNX. Looking does not create the socket folder.
+    """
+    if sys.platform == "win32" or not hasattr(socket, "AF_UNIX"):
+        return "in-process ONNX"
+    if sys.platform != "darwin" or platform.machine() != "arm64":
+        return "in-process ONNX"
+    if not warm_enabled():
+        return "off"
+    minutes = daemon._idle_minutes_default()
+    idle = str(int(minutes)) if minutes == int(minutes) else str(minutes)
+    try:
+        path = daemon._socket_path(create=False)
+    except Exception:
+        return "off"
+    if path.exists():
+        return f"listening, idle {idle} minutes"
+    return "off"
 
 
 def encode_via_server(texts: list[str]) -> list[list[float]]:

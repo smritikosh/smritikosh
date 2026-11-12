@@ -12,6 +12,15 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Added
+
+- `smritikosh status` prints index coverage, the embedding that wrote the vectors, and
+  whether the Apple silicon warm server is listening.
+- `smritikosh explore search --explain` adds the channel, facet, and widened span for
+  each hit, plus how many lines in those files were not cited.
+- `smritikosh savings` totals lines not opened since the first recorded search. Searches
+  from before this version are not counted.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added

@@ -24,6 +24,7 @@ from smritikosh.indexing.pipeline._pipeline import (
 )
 from smritikosh.models import Chunk, SearchOptions, SourceFile
 from smritikosh.ports.embedder import Embedder
+from smritikosh.savings import read_indexed_roots
 
 # ── Stubs ─────────────────────────────────────────────────────────────────────
 
@@ -368,6 +369,7 @@ def test_build_index_runs_end_to_end(tmp_path: Path) -> None:
 
     paths = storage.get_all_file_paths()
     assert "hello.py" in paths
+    assert read_indexed_roots(con) == [str(tmp_path.resolve())]
 
 
 def test_build_index_second_run_is_idempotent(tmp_path: Path) -> None:

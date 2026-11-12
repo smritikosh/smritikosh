@@ -2,7 +2,16 @@
 
 from typing import Final
 
-__all__ = ["CODE_QUERY_INSTRUCTION", "DEFAULT_DB_PATH", "DEFAULT_MODEL"]
+__all__ = [
+    "CODE_QUERY_INSTRUCTION",
+    "DEFAULT_DB_PATH",
+    "DEFAULT_MODEL",
+    "INDEXED_ROOTS_KEY",
+]
+
+#: Absolute repo roots written by ``smritikosh index``, so a later search can
+#: count the lines in the files it cited.
+INDEXED_ROOTS_KEY: Final = "indexed_roots"
 
 # One file holds vectors, nodes and the incremental caches.
 DEFAULT_DB_PATH: Final = "smritikosh.duckdb"

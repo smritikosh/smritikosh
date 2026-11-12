@@ -2,6 +2,7 @@
 
 from smritikosh.models.retrieval import (
     CandidateScore,
+    ExplainedHit,
     HybridSearchOptions,
     IndexedChunk,
     IndexInfo,
@@ -26,6 +27,7 @@ from smritikosh.models.types import (
 __all__ = [
     "CandidateScore",
     "Capture",
+    "ExplainedHit",
     "Chunk",
     "ChunkingStrategy",
     "HybridSearchOptions",

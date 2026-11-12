@@ -5,17 +5,23 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+import duckdb
+import toons
 
 from smritikosh.adapters.embedder import (
     EmbedderUnavailableError,
     resolve_embedder,
     select_embedder,
 )
+from smritikosh.adapters.embedder.mps.client import warm_server_label
 from smritikosh.constants import DEFAULT_DB_PATH
 from smritikosh.exploration_cli import explore
+from smritikosh.index_status import load_index_status, open_error
+from smritikosh.savings import format_savings_total, savings_total
 
 if TYPE_CHECKING:
     from smritikosh.adapters.storage.duckdb import DuckDBAdapter
@@ -266,6 +272,49 @@ def search(
         for line in (r.snippet or "").splitlines():
             click.echo(f"    {line}")
         click.echo()
+
+
+@main.command()
+@click.option(
+    "--db-path",
+    default=DEFAULT_DB_PATH,
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="DuckDB database file.",
+)
+@click.option(
+    "--toon",
+    is_flag=True,
+    help="Print the same fields as TOON instead of plain text.",
+)
+def status(db_path: str, toon: bool) -> None:
+    """Show index coverage, embedding identity, and warm-server state."""
+    if not Path(db_path).is_file():
+        raise click.ClickException(
+            f"No index at {db_path}. Run `smritikosh index .` first."
+        )
+    try:
+        report = load_index_status(db_path, warm_server=warm_server_label())
+    except duckdb.Error as exc:
+        raise click.ClickException(open_error(exc)) from exc
+    if toon:
+        click.echo(toons.dumps(report.as_dict()))
+        return
+    for line in report.lines():
+        click.echo(line)
+
+
+@main.command()
+@click.option(
+    "--db-path",
+    default=DEFAULT_DB_PATH,
+    show_default=True,
+    type=click.Path(dir_okay=False),
+    help="DuckDB database file.",
+)
+def savings(db_path: str) -> None:
+    """Print lines not opened since the first recorded search."""
+    click.echo(format_savings_total(savings_total(db_path)))
 
 
 if __name__ == "__main__":

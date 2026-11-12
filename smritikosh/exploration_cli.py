@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from pathlib import Path
 
 import click
 import toons
@@ -21,9 +22,15 @@ from smritikosh.exploration import (
     ReadOnlyExplorer,
     SourceLine,
 )
-from smritikosh.models import HybridSearchOptions, SearchLocation
+from smritikosh.models import ExplainedHit, HybridSearchOptions, SearchLocation
 from smritikosh.ports.embedder import Embedder
 from smritikosh.retrieval.service import HybridSearchService
+from smritikosh.savings import (
+    format_explain_hit,
+    format_savings_line,
+    measure_search,
+    record_search_savings,
+)
 
 __all__ = ["explore"]
 
@@ -306,12 +313,18 @@ def list_tools(prose: bool, toon: bool) -> None:  # noqa: ARG001
     is_flag=True,
     hidden=True,
 )
+@click.option(
+    "--explain",
+    is_flag=True,
+    help="After the rows, print channel, facet, widened span, and lines not opened.",
+)
 def hybrid_search(
     queries: tuple[str, ...],
     max_results: int,
     db_path: str,
     prose: bool,
     toon: bool,  # noqa: ARG001
+    explain: bool,
 ) -> None:
     """Search one question's facets; pass 4-8 focused QUERY values.
 
@@ -351,20 +364,44 @@ def hybrid_search(
                 reader,
             )
             try:
-                locations: list[SearchLocation] = service.search(
-                    queries,
-                    options=HybridSearchOptions(max_results=max_results),
-                )
+                hits: list[ExplainedHit] | None = None
+                if explain:
+                    hits = service.explained(
+                        queries,
+                        options=HybridSearchOptions(max_results=max_results),
+                    )
+                    locations = [hit.location for hit in hits]
+                else:
+                    locations = service.search(
+                        queries,
+                        options=HybridSearchOptions(max_results=max_results),
+                    )
             except RuntimeError as exc:
                 raise click.ClickException(str(exc)) from exc
         finally:
             lexical_store.close()
+        roots = _indexed_roots(reader)
     finally:
         reader.close()
+    savings = measure_search(locations, [*roots, Path.cwd()])
+    record_search_savings(db_path, savings)
     if prose:
         _echo_search_prose(locations, queries=queries)
-        return
-    _echo_toon(_search_payload(locations, queries=queries))
+    else:
+        _echo_toon(_search_payload(locations, queries=queries))
+    if explain and hits is not None:
+        labels = {query: f"Q{index}" for index, query in enumerate(queries, start=1)}
+        for hit in hits:
+            click.echo(format_explain_hit(hit, labels))
+        click.echo(format_savings_line(savings))
+
+
+def _indexed_roots(reader: DuckDBSourceReader) -> list[Path]:
+    """Repo roots stored with the index. A stand-in reader contributes none."""
+    raw = reader.indexed_roots()
+    if not isinstance(raw, list):
+        return []
+    return [Path(root) for root in raw]
 
 
 @explore.command("chunks")

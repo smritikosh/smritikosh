@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 import duckdb
 
+from smritikosh.constants import INDEXED_ROOTS_KEY
 from smritikosh.models import (
     IndexedChunk,
     IndexInfo,
@@ -115,6 +117,27 @@ class DuckDBSourceReader(SourceReader):
             "SELECT value FROM kv_store WHERE key = 'embedding_identity'"
         ).fetchone()
         return EmbeddingIdentity(**json.loads(row[0])) if row else None
+
+    def indexed_roots(self) -> list[str]:
+        """Return absolute repo roots recorded when this index was built."""
+        row: tuple[str] | None = self._connection.execute(
+            "SELECT value FROM kv_store WHERE key = ?",
+            [INDEXED_ROOTS_KEY],
+        ).fetchone()
+        if row is None:
+            return []
+        loaded = json.loads(row[0])
+        return [str(item) for item in loaded] if isinstance(loaded, list) else []
+
+    def chunk_path_suffixes(self) -> dict[str, int]:
+        """Count chunk rows by file suffix, most common first."""
+        rows: list[tuple[str]] = self._connection.execute(
+            "SELECT path FROM nodes WHERE kind = 'chunk'"
+        ).fetchall()
+        counts: Counter[str] = Counter(
+            Path(path).suffix.lower() or "(none)" for (path,) in rows
+        )
+        return dict(counts.most_common())
 
     def semantic_search(
         self,

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from smritikosh.models import SearchResult
 from smritikosh.models.retrieval import (
+    ExplainedHit,
     HybridSearchOptions,
     RankedCandidate,
     SearchLocation,
@@ -62,6 +66,15 @@ class HybridSearchService:
         options: HybridSearchOptions | None = None,
     ) -> list[SearchLocation]:
         """Retrieve, fuse, and select locations for caller-supplied facets."""
+        return [hit.location for hit in self.explained(facets, options=options)]
+
+    def explained(
+        self,
+        facets: tuple[str, ...],
+        *,
+        options: HybridSearchOptions | None = None,
+    ) -> list[ExplainedHit]:
+        """Select the same locations as :meth:`search`, plus ranks and chunk span."""
         options = options or HybridSearchOptions()
         normalized: tuple[str, ...] = tuple(
             facet.strip() for facet in facets if facet.strip()
@@ -90,18 +103,60 @@ class HybridSearchService:
             normalized,
             options=options,
         )
+        origins = _chunk_origins(seeds)
         located: list[RankedCandidate] = complete_definitions(
             seeds,
             reader=self._reader,
             options=options,
         )
-        return [
-            SearchLocation(
-                path=candidate.result.path,
-                start_line=candidate.result.start_line,
-                end_line=candidate.result.end_line,
-                symbol=candidate.result.symbol,
-                facets=_reported_facets(candidate, normalized),
+        hits: list[ExplainedHit] = []
+        for candidate in located:
+            result = candidate.result
+            origin = _origin_for(result, origins)
+            hits.append(
+                ExplainedHit(
+                    location=SearchLocation(
+                        path=result.path,
+                        start_line=result.start_line,
+                        end_line=result.end_line,
+                        symbol=result.symbol,
+                        facets=_reported_facets(candidate, normalized),
+                    ),
+                    dense_rank=candidate.score.dense_rank,
+                    lexical_rank=candidate.score.lexical_rank,
+                    chunk_start_line=origin[0],
+                    chunk_end_line=origin[1],
+                )
             )
-            for candidate in located
-        ]
+        return hits
+
+
+@dataclass(frozen=True)
+class _Origins:
+    by_span: dict[tuple[str, tuple[int, int]], tuple[int, int]]
+    by_symbol: dict[tuple[str, str | None, str | None], tuple[int, int]]
+
+
+def _chunk_origins(seeds: list[RankedCandidate]) -> _Origins:
+    """Remember each seed's chunk span, by exact span and by symbol."""
+    origins = _Origins(by_span={}, by_symbol={})
+    for seed in seeds:
+        span = (seed.result.start_line, seed.result.end_line)
+        origins.by_span[(seed.result.path, span)] = span
+        origins.by_symbol.setdefault(
+            (seed.result.path, seed.result.symbol, seed.result.chunk_kind),
+            span,
+        )
+    return origins
+
+
+def _origin_for(result: SearchResult, origins: _Origins) -> tuple[int, int]:
+    """Return the chunk span a widened result came from."""
+    span = (result.start_line, result.end_line)
+    exact = origins.by_span.get((result.path, span))
+    if exact is not None:
+        return exact
+    return origins.by_symbol.get(
+        (result.path, result.symbol, result.chunk_kind),
+        span,
+    )

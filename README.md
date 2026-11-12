@@ -81,6 +81,25 @@ One note on concurrency: any number of searches may read an index at once, but a
 still supports only one writer — don't run two `smritikosh index` commands against the same
 `--db-path` in parallel.
 
+### See what you saved
+
+`status` prints whether the index is complete and which embedding wrote it.
+`explore search --explain` adds, under the usual rows, which channel ranked each hit
+and one line for that search. `savings` adds those searches up.
+
+Lines not opened are the lines in the files search pointed at, minus the lines actually
+cited. The total starts at the first search after this version, not from the day the index
+was created. It counts source lines, not money.
+
+```bash
+uv tool install smritikosh          # or: pipx install smritikosh
+smritikosh index .
+smritikosh status
+smritikosh explore search "authorization decision flow" "authorization tests" --explain
+smritikosh savings
+smritikosh explore chunks --range src/auth/policy.py 176 193
+```
+
 ## Retrieval: _evidence you can point at_
 
 <img src="https://raw.githubusercontent.com/smritikosh/smritikosh/main/assets/hybrid-retrieval-light.svg" alt="An agent asks one plain question, why can't users log in, and Smritikosh turns it into four angles: where login is decided, what it checks, where it says no, and the tests that cover it. Each angle runs down three retrieval channels: semantic recall over dense vectors, lexical precision over BM25, and a call-graph channel that is not yet implemented. The rankings are combined by Reciprocal Rank Fusion, Facet Reservation, and Maximal Marginal Relevance, and what survives comes back as a short list of exact line ranges such as auth/policy.py 176-193: whole definitions plus one hop further, with line numbers that stay true." width="100%" draggable="false">
