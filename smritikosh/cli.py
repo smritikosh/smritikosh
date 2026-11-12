@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib.metadata
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
@@ -50,6 +51,8 @@ def _build_index_with_progress(
     *,
     n_files: int | None = None,
     full: bool = False,
+    only_paths: list[str] | None = None,
+    removed_paths: list[str] | None = None,
 ) -> None:
     """Run :func:`build_index` with a Click progress bar driven by ``on_file_indexed``.
 
@@ -81,6 +84,8 @@ def _build_index_with_progress(
             vector_store,
             on_file_indexed=_on_file,
             full=full,
+            only_paths=only_paths,
+            removed_paths=removed_paths,
         )
 
 
@@ -105,6 +110,7 @@ async def _watch_loop(
         ) from exc
 
     async for changes in awatch(repo_path):
+        edited, removed = _watch_paths(repo_path, changes)
         click.echo(f"  {len(changes)} change(s) detected — re-indexing …")
         # build_index calls asyncio.run() internally; dispatch to a worker
         # thread so it can create its own loop without conflicting with ours.
@@ -114,8 +120,38 @@ async def _watch_loop(
             embedder,
             storage,
             vector_store,
+            n_files=len(edited),
+            only_paths=edited,
+            removed_paths=removed,
         )
         click.echo("  Done.")
+
+
+def _watch_paths(
+    repo_path: str, changes: set[tuple[object, str]]
+) -> tuple[list[str], list[str]]:
+    """Split a watchfiles batch into paths to reindex and paths to drop."""
+    root = Path(repo_path).resolve()
+    edited: list[str] = []
+    removed: list[str] = []
+    for change, raw in changes:
+        relative = _repo_relative(root, str(raw))
+        kind = getattr(change, "value", change)
+        if str(kind) == "deleted" or not (root / relative).is_file():
+            removed.append(relative)
+        else:
+            edited.append(relative)
+    return edited, removed
+
+
+def _repo_relative(root: Path, raw: str) -> str:
+    path = Path(raw)
+    if not path.is_absolute():
+        return path.as_posix()
+    try:
+        return path.resolve().relative_to(root).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 # ── CLI group ─────────────────────────────────────────────────────────────────

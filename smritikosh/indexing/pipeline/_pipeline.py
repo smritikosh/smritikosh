@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Iterator
 
 from smritikosh.adapters.embedder.fastembed import FastEmbedEmbedder
 from smritikosh.adapters.file_source.local import LocalFileSource
@@ -25,6 +25,7 @@ from smritikosh.indexing.pipeline._stages import _chunk, _extract, _parse
 from smritikosh.indexing.strategies._helpers import budget_chars
 from smritikosh.models import Chunk, SourceFile
 from smritikosh.ports.embedder import Embedder
+from smritikosh.ports.file_source import FileSource
 from smritikosh.ports.retrieval import LexicalStore
 from smritikosh.ports.storage import StorageAdapter
 from smritikosh.ports.vector_store import VectorStore
@@ -126,19 +127,45 @@ async def process_file(source: SourceFile) -> None:
 # ── Root orchestrator ─────────────────────────────────────────────────────────
 
 
+class _SelectedFiles(FileSource):
+    """A file source that yields only the paths a watch event named."""
+
+    def __init__(self, inner: FileSource, paths: Collection[str]) -> None:
+        self._inner = inner
+        self._paths = tuple(sorted(set(paths)))
+
+    def iter_paths(self) -> Iterator[str]:
+        yield from self._paths
+
+    def read_text(self, path: str) -> str:
+        return self._inner.read_text(path)
+
+    def is_ignored(self, path: str) -> bool:
+        return self._inner.is_ignored(path)
+
+
 @sm.tracked
 async def _run_pipeline(
     repo_path: str,
     *,
     file_concurrency: int | None = None,
     on_file_indexed: Callable[[str], None] | None = None,
+    only_paths: Collection[str] | None = None,
+    removed_paths: Collection[str] | None = None,
 ) -> None:
-    """Discover files, clean up deleted ones, fan out process_file."""
+    """Discover files, clean up deleted ones, fan out process_file.
+
+    *only_paths* limits the walk to those relative paths. Deletion then
+    removes *removed_paths* and any of *only_paths* that is no longer
+    indexable, and leaves every other stored file alone.
+    """
     storage = use_context(STORAGE)
     embedder = use_context(EMBEDDER)
     vector_store = use_context(VECTOR_STORE)
     lexical_store = use_context(LEXICAL_STORE)
-    file_source = LocalFileSource(repo_path)
+    file_source: FileSource = LocalFileSource(repo_path)
+    if only_paths is not None:
+        file_source = _SelectedFiles(file_source, only_paths)
     # Chunks are capped at what this model actually encodes — an over-long
     # chunk would be stored whole but embedded from its prefix only.
     max_chars = budget_chars(embedder.max_tokens)
@@ -157,7 +184,17 @@ async def _run_pipeline(
     current_paths = {f.path for f in files}
     memo_store = get_memo_store()
 
-    for deleted in stored_paths - current_paths:
+    if only_paths is None:
+        gone = stored_paths - current_paths
+    else:
+        gone = {path for path in (removed_paths or ()) if path in stored_paths}
+        gone.update(
+            path
+            for path in only_paths
+            if path not in current_paths and path in stored_paths
+        )
+
+    for deleted in gone:
         # Read the ids before delete_file drops the nodes that carry them.
         vector_store.delete_many(storage.get_chunk_ids_for_file(deleted))
         lexical_store.delete_path(deleted)
@@ -201,6 +238,8 @@ def build_index(
     *,
     lexical_store: LexicalStore | None = None,
     full: bool = False,
+    only_paths: Collection[str] | None = None,
+    removed_paths: Collection[str] | None = None,
 ) -> None:
     """Build or incrementally update the vector index for *repo_path*.
 
@@ -227,6 +266,12 @@ def build_index(
         Clear the source, dense, and lexical indexes and the incremental
         caches before rebuilding, so the run starts from empty rather than
         layering new rows over stale ones.
+    only_paths:
+        When set, read and reindex only these relative paths. ``None`` walks
+        the tree. An empty collection reads nothing.
+    removed_paths:
+        Relative paths to drop. Used with *only_paths* so a partial reindex
+        does not treat every other stored file as deleted.
     """
     embedder = embedder or FastEmbedEmbedder()
     storage = storage or DuckDBAdapter(DEFAULT_DB_PATH)
@@ -271,5 +316,7 @@ def build_index(
                 repo_path,
                 file_concurrency=file_concurrency,
                 on_file_indexed=on_file_indexed,
+                only_paths=only_paths,
+                removed_paths=removed_paths,
             )
         )

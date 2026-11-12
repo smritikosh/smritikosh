@@ -12,6 +12,11 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Changed
+
+- `smritikosh index --watch` reindexes only the files watchfiles reports, instead
+  of walking and reading the whole tree on every save.
+
 ## [0.4.0] - 2026-10-17
 
 ### Added
