@@ -4,18 +4,18 @@ Notable changes to Smritikosh. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-While the project is alpha (`0.x`), a minor bump may carry a breaking change; the entry
-will say so.
-
 Land your entry under `Unreleased` in the same pull request as the change. At release the
 heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-17
+
 ### Added
 
 - `explore impact NAME` lists the callers or callees of a Python definition, with
-  the lines each call is made on. `--depth` follows them further.
+  the lines each call is made on. `--depth` follows them further. Indexes built before
+  1.0.0 have no call edges; re-index to use it.
 
 ## [0.4.0] - 2026-10-17
 
@@ -148,7 +148,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   chunk of a section carries that section's heading as its symbol, and deduplication keyed
   on the symbol, so a long section returned only its first chunk however many matched.
 
-[Unreleased]: https://github.com/smritikosh/smritikosh/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/smritikosh/smritikosh/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/smritikosh/smritikosh/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/smritikosh/smritikosh/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/smritikosh/smritikosh/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/smritikosh/smritikosh/compare/v0.1.0...v0.2.0

@@ -21,7 +21,7 @@ API keys, hosted vector databases, or sending source data off-device.
 [![Downloads](https://img.shields.io/pypi/dm/smritikosh?color=34D399)](https://pypi.org/project/smritikosh/)
 [![Python 3.10–3.13](https://img.shields.io/badge/python-3.10%E2%80%933.13-blue)](https://www.python.org/)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](https://github.com/smritikosh/smritikosh/blob/main/LICENSE)
-![Status: Alpha](https://img.shields.io/badge/status-alpha-orange)
+![Status: Stable](https://img.shields.io/badge/status-stable-brightgreen)
 
 </div>
 
