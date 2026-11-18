@@ -551,6 +551,53 @@ def test_should_report_exact_lines_for_matches_in_source_text(tmp_path: Path) ->
     ]
 
 
+def test_should_not_spend_the_limit_on_chunks_matching_only_in_a_breadcrumb(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    db_path: str = _make_db(
+        tmp_path,
+        [
+            ("chunk:a", "docs/a.md", 3, 3, "# Setup\n## Mac\n\nUse brew.", None),
+            ("chunk:b", "docs/a.md", 7, 7, "# Setup\n## Linux\n\nUse apt.", None),
+            ("chunk:c", "src/z.py", 1, 1, "def setup(): pass", None),
+        ],
+        metadata={
+            "chunk:a": {"source_text": "Use brew."},
+            "chunk:b": {"source_text": "Use apt."},
+        },
+    )
+    explorer = ReadOnlyExplorer(db_path)
+
+    # Act
+    matches = explorer.find_text_lines("setup", limit=2)
+    explorer.close()
+
+    # Assert
+    assert [(m.path, m.line_number) for m in matches] == [("src/z.py", 1)]
+
+
+def test_should_find_a_source_line_the_retrieval_text_leaves_out(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    db_path: str = _make_db(
+        tmp_path,
+        [("chunk:doc", "docs/a.md", 1, 4, "# Guide\n\nRun the tests.", None)],
+        metadata={"chunk:doc": {"source_text": "Guide\n=====\n\nRun the tests."}},
+    )
+    explorer = ReadOnlyExplorer(db_path)
+
+    # Act
+    matches = explorer.find_text_lines("=====")
+    explorer.close()
+
+    # Assert
+    assert [(m.line_number, m.text, m.exact_line) for m in matches] == [
+        (2, "=====", True)
+    ]
+
+
 def test_should_reject_reversed_line_range(indexed_db: str) -> None:
     # Arrange
     explorer = ReadOnlyExplorer(indexed_db)

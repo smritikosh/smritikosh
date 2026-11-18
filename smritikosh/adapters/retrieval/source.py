@@ -69,6 +69,11 @@ _DOCUMENTATION_PATH_SQL: Final[str] = """
     OR regexp_matches(lower(path), '(^|/)(readme|changelog)(\\.[^/]*)?$')
     OR regexp_matches(lower(path), '\\.(md|mdx|rst|adoc)$')
 """
+_TEXT_SQL: Final[str] = "json_extract_string(metadata, '$.text')"
+#: The file's own lines, as ``_source`` reads them from a chunk.
+_SOURCE_SQL: Final[str] = (
+    f"coalesce(json_extract_string(metadata, '$.source_text'), {_TEXT_SQL})"
+)
 
 
 class DuckDBSourceReader(SourceReader):
@@ -234,6 +239,16 @@ class DuckDBSourceReader(SourceReader):
         Returns:
             Matching chunks ordered by path and source line.
         """
+        return self._chunks_containing(_TEXT_SQL, text, path=path, limit=limit)
+
+    def _chunks_containing(
+        self,
+        column_sql: str,
+        text: str,
+        *,
+        path: str | None,
+        limit: int,
+    ) -> list[IndexedChunk]:
         self._validate_limit(limit)
         path_clause: str = " AND path = ?" if path is not None else ""
         parameters: list[str | int] = [text]
@@ -245,7 +260,7 @@ class DuckDBSourceReader(SourceReader):
             SELECT id, name, path, metadata
             FROM nodes
             WHERE kind = 'chunk'
-              AND contains(lower(json_extract_string(metadata, '$.text')), lower(?))
+              AND contains(lower({column_sql}), lower(?))
               {path_clause}
             ORDER BY path, CAST(json_extract(metadata, '$.start_line') AS INTEGER)
             LIMIT ?
@@ -275,7 +290,9 @@ class DuckDBSourceReader(SourceReader):
         self._validate_limit(limit)
         needle: str = text.lower()
         matches: dict[tuple[str, int, str], TextMatch] = {}
-        for chunk in self.text_search(text, path=path, limit=limit):
+        # Matched on the source the lines are read from, so a heading repeated in
+        # breadcrumbs cannot fill the limit with chunks that hold no such line.
+        for chunk in self._chunks_containing(_SOURCE_SQL, text, path=path, limit=limit):
             chunk_lines: list[str] = self._source(chunk).split("\n")
             # A grouped chunk concatenates definitions that are not adjacent in
             # the file, so its text does not line up with the lines it claims.
