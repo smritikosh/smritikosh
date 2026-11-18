@@ -198,6 +198,24 @@ def test_should_record_exact_source_lines_when_chunk_text_differs() -> None:
     )
 
 
+def test_should_read_markdown_headings_back_from_their_chunks() -> None:
+    content = "# Guide\n\nIntro.\n\n## Setup\n\nInstall it.\n\n## Usage\n\nRun it.\n"
+    p = parsed(content, "doc.md", "markdown")
+    headings = [
+        cap("definition.section", node_for(content, f"{marks} {name}"), key=name)
+        for marks, name in (("#", "Guide"), ("##", "Setup"), ("##", "Usage"))
+    ]
+
+    chunks = chunk_file(p, headings, SectionChunkingStrategy())
+
+    rebuilt: dict[int, str] = {}
+    for chunk in chunks:
+        assert chunk.source_text is not None
+        for offset, line in enumerate(chunk.source_text.split("\n")):
+            rebuilt[chunk.start_line + offset] = line
+    assert [rebuilt[number] for number in sorted(rebuilt)] == content.splitlines()
+
+
 def test_should_record_no_source_lines_when_chunk_text_is_the_source() -> None:
     p = parsed("def foo(): pass\n")
     captures = [cap("definition.function", node_for(p.content, "def foo(): pass"))]

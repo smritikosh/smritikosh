@@ -459,7 +459,33 @@ class TestMarkdownLineRanges:
 
         chunks = SectionChunkingStrategy().chunk(p, headings)
 
-        assert [(c.start_line, c.end_line) for c in chunks] == [(3, 4), (7, 7)]
+        assert [(c.start_line, c.end_line) for c in chunks] == [(1, 4), (5, 7)]
+
+    def test_heading_without_a_body_is_claimed_by_the_next_section(self) -> None:
+        content = "# Title\n\n## Part\n\ntext\n"
+        p = parsed(content, "doc.md", "markdown")
+        headings = [
+            cap("definition.section", node_for(content, "# Title"), key="Title"),
+            cap("definition.section", node_for(content, "## Part"), key="Part"),
+        ]
+
+        (chunk,) = SectionChunkingStrategy().chunk(p, headings)
+
+        assert (chunk.start_line, chunk.end_line) == (1, 5)
+        assert chunk.symbol == "Title > Part"
+
+    def test_only_the_first_chunk_of_a_split_section_claims_the_heading(self) -> None:
+        paragraphs = "\n\n".join(f"Paragraph {n} " + "word " * 30 for n in range(6))
+        content = f"# A\n\n{paragraphs}\n"
+        p = parsed(content, "doc.md", "markdown")
+        heading = cap("definition.section", node_for(content, "# A"), key="A")
+
+        chunks = SectionChunkingStrategy(max_chars=400).chunk(p, [heading])
+
+        assert len(chunks) > 1
+        assert chunks[0].start_line == 1
+        for previous, following in zip(chunks, chunks[1:], strict=False):
+            assert following.start_line > previous.end_line
 
     def test_split_windows_claim_only_their_own_lines(self) -> None:
         windows = _split_markdown("one\ntwo\nthree\nfour\n", 8)

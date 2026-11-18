@@ -473,6 +473,9 @@ def _chunk_markdown(
     )
 
     hierarchy: list[tuple[int, str]] = []
+    # Line the next chunk starts on. A heading with no body yields no chunk,
+    # so its line carries over to the next section that has one.
+    heading_line: int | None = None
     for index, capture in enumerate(headings):
         level = _heading_level(capture, raw)
         hierarchy = [(depth, name) for depth, name in hierarchy if depth < level]
@@ -488,18 +491,30 @@ def _chunk_markdown(
         body = body[leading_newlines:]
         body_line = capture.node.end_point[0] + 1 + leading_newlines
         symbol = " > ".join(name for _, name in hierarchy)
-        chunks.extend(
-            _markdown_text_chunks(
-                parsed,
-                body,
-                body_line,
-                prefix,
-                symbol,
-                max_chars,
-                token_counter,
-                max_tokens,
-            )
+        if heading_line is None:
+            heading_line = capture.node.start_point[0] + 1
+        section_chunks = _markdown_text_chunks(
+            parsed,
+            body,
+            body_line,
+            prefix,
+            symbol,
+            max_chars,
+            token_counter,
+            max_tokens,
         )
+        if section_chunks:
+            first = section_chunks[0]
+            section_chunks[0] = build_chunk(
+                first.path,
+                first.text,
+                "section",
+                heading_line,
+                first.end_line,
+                first.symbol,
+            )
+            heading_line = None
+        chunks.extend(section_chunks)
     if not chunks and parsed.content.strip():
         chunks = _markdown_text_chunks(
             parsed,
