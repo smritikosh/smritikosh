@@ -22,6 +22,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   Markdown and TOML chunks no longer claim the line after their last.
 - `explore chunks --range` now returns Markdown heading lines: a section's range starts
   on its heading instead of the first line of its body.
+- DuckDB is capped below 2: re-indexing failed on it with `ResourceInUseException`, and
+  an index it writes cannot be opened by 1.x. The failure is fixed as well.
 
 ## [1.0.0] - 2026-11-17
 

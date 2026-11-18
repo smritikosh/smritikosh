@@ -34,7 +34,8 @@ classifiers = [
 requires-python = ">=3.10,<3.14"
 dependencies = [
     "click>=8.1",
-    "duckdb>=1.0",
+    # Below 2: an index written by DuckDB 2 cannot be opened by 1.x.
+    "duckdb>=1.0,<2",
     # Vectors are handed to DuckDB as an Arrow FixedSizeListArray. Binding them
     # as Python lists costs ~120 us per float, which made storing the vectors
     # 75 % of an index run; Arrow is a contiguous buffer DuckDB ingests as-is.
@@ -94,7 +95,7 @@ dev = [
     # whichever one runs second.
     "ruff==0.16.7",
     "pre-commit>=4.6.2",
-    "duckdb>=1.0",
+    "duckdb>=1.0,<2",
 ]
 
 # Both Mac architectures are supported, so the lock file must carry a

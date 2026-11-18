@@ -35,6 +35,10 @@ def insert_arrow(
 ) -> None:
     """Execute *statement*, which reads the batch as the relation ``_incoming``."""
     with WRITE_LOCK:
+        # DuckDB 2 refuses register() while a result is still open; 1.x has no
+        # complete() and needs none.
+        if hasattr(connection, "complete"):
+            connection.complete()
         connection.register(INCOMING, incoming)
         try:
             connection.execute(statement)

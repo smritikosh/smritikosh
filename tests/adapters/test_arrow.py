@@ -110,6 +110,23 @@ def test_should_release_the_lock_when_the_statement_fails() -> None:
     assert _lock_is_held_elsewhere() is False
 
 
+def test_should_insert_while_an_earlier_result_is_still_open() -> None:
+    """DuckDB 2 refuses ``register`` in that state, which broke re-indexing."""
+    pa = pytest.importorskip("pyarrow")
+    connection = duckdb.connect(":memory:")
+    connection.execute("CREATE TABLE sink (value INTEGER)")
+    connection.execute("INSERT INTO sink VALUES (1)")
+    connection.execute("SELECT value FROM sink").fetchone()
+
+    insert_arrow(
+        connection,
+        pa.table({"value": pa.array([2])}),
+        f"INSERT INTO sink SELECT * FROM {INCOMING}",
+    )
+
+    assert connection.execute("SELECT count(*) FROM sink").fetchall() == [(2,)]
+
+
 def test_should_unregister_the_relation_when_the_statement_fails() -> None:
     """A leaked registration would be read by the next caller's statement."""
     pa = pytest.importorskip("pyarrow")
