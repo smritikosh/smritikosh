@@ -9,6 +9,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-18
+
 ### Fixed
 
 - `explore chunks --range` no longer drops module or class constants, or prints them on
@@ -166,7 +168,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   chunk of a section carries that section's heading as its symbol, and deduplication keyed
   on the symbol, so a long section returned only its first chunk however many matched.
 
-[Unreleased]: https://github.com/smritikosh/smritikosh/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/smritikosh/smritikosh/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/smritikosh/smritikosh/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/smritikosh/smritikosh/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/smritikosh/smritikosh/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/smritikosh/smritikosh/compare/v0.2.0...v0.3.0
