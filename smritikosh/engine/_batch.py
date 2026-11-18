@@ -110,17 +110,16 @@ class BatchGatherer:
     # -- private ---------------------------------------------------------------
 
     async def _delayed_flush(self) -> None:
-        await asyncio.sleep(self._WINDOW_SECS)
-        fire_items: list[Any] | None = None
-        fire_futures: list[asyncio.Future[Any]] | None = None
-
-        async with self._get_lock():
-            if self._pending:
+        # Runs until the queue is empty: an item submitted while a batch is
+        # firing sees this task still alive and starts no flush of its own.
+        while True:
+            await asyncio.sleep(self._WINDOW_SECS)
+            async with self._get_lock():
+                if not self._pending:
+                    return
                 fire_items = [it for it, _ in self._pending]
                 fire_futures = [f for _, f in self._pending]
                 self._pending.clear()
-
-        if fire_items is not None and fire_futures is not None:
             await self._fire(fire_items, fire_futures)
 
     async def _fire(

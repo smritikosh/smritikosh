@@ -59,6 +59,29 @@ async def test_gatherer_fires_on_window_timeout():
     assert fired == [2]
 
 
+async def test_gatherer_flushes_an_item_submitted_while_a_batch_is_firing():
+    """Nothing else would flush it if no later submit arrives."""
+    release = asyncio.Event()
+    fired: list[list[str]] = []
+
+    async def batch_fn(items: list[str]) -> list[str]:
+        fired.append(list(items))
+        if len(fired) == 1:
+            await release.wait()
+        return [item.upper() for item in items]
+
+    gatherer = BatchGatherer(batch_fn, max_size=100)
+    first = asyncio.create_task(gatherer.submit("a"))
+    while not fired:
+        await asyncio.sleep(0.001)
+    second = asyncio.create_task(gatherer.submit("b"))
+    await asyncio.sleep(0)
+    release.set()
+
+    assert await asyncio.wait_for(asyncio.gather(first, second), 2) == ["A", "B"]
+    assert fired == [["a"], ["b"]]
+
+
 async def test_gatherer_sync_batch_fn():
     """BatchGatherer wraps a sync function via asyncio.to_thread."""
 

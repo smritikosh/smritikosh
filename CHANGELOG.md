@@ -24,6 +24,8 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
   on its heading instead of the first line of its body.
 - DuckDB is capped below 2: re-indexing failed on it with `ResourceInUseException`, and
   an index it writes cannot be opened by 1.x. The failure is fixed as well.
+- Indexing no longer hangs when the last chunks reach the embedding queue while a batch
+  is being embedded.
 
 ## [1.0.0] - 2026-11-17
 
