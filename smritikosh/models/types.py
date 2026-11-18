@@ -89,6 +89,9 @@ class Chunk:
     #: Name of the definition this chunk came from, when the chunker knew one.
     #: A grouped or whole-file chunk covers no single definition and has None.
     symbol: str | None = None
+    #: The file's own lines start_line..end_line, kept only when *text* differs
+    #: from them — a heading breadcrumb or key path added for retrieval.
+    source_text: str | None = None
 
 
 @dataclass

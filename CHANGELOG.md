@@ -9,6 +9,18 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Fixed
+
+- `explore chunks --range` no longer drops module or class constants, or prints them on
+  the wrong lines. Grouped constants are now stored as exact slices of the file, with
+  indentation and the blank lines between them, and code between two constants starts a
+  new chunk. Re-index to pick it up.
+- `explore chunks --range` now returns Markdown and TOML lines instead of "No source
+  lines found", and methods keep the indentation of their first line. A chunk whose text
+  differs from the file — a Markdown heading breadcrumb, a JSON key path — now also
+  stores the file's own lines, which reads use; search still uses the retrieval text.
+  Markdown and TOML chunks no longer claim the line after their last.
+
 ## [1.0.0] - 2026-11-17
 
 ### Added

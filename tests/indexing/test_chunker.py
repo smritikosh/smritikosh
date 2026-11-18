@@ -33,7 +33,9 @@ class RecordingStrategy:
 
     def chunk(self, parsed_file: ParsedFile, captures: list[Capture]) -> list[Chunk]:
         self.calls.append((parsed_file, captures))
-        return [build_chunk(parsed_file.path, "delegated", "own", 1, 1)]
+        return [
+            build_chunk(parsed_file.path, parsed_file.content.rstrip("\n"), "own", 1, 1)
+        ]
 
 
 def test_should_delegate_chunking_entirely_to_strategy() -> None:
@@ -44,7 +46,7 @@ def test_should_delegate_chunking_entirely_to_strategy() -> None:
     chunks = chunk_file(p, captures, strategy)
 
     assert strategy.calls == [(p, captures)]
-    assert chunks == [build_chunk(p.path, "delegated", "own", 1, 1)]
+    assert chunks == [build_chunk(p.path, "def foo(): pass", "own", 1, 1)]
 
 
 def test_should_register_chunk_and_strategy_logic_for_memo_invalidation() -> None:
@@ -53,12 +55,14 @@ def test_should_register_chunk_and_strategy_logic_for_memo_invalidation() -> Non
     assert hasattr(SectionChunkingStrategy.chunk, "_logic_fingerprint")
     assert hasattr(RegexChunkingStrategy.chunk, "_logic_fingerprint")
     assert hasattr(build_chunk, "_logic_fingerprint")
+    assert hasattr(make_group_chunks, "_logic_fingerprint")
     assert {
         chunk_file._logic_fingerprint,  # type: ignore[attr-defined]
         AstChunkingStrategy.chunk._logic_fingerprint,  # type: ignore[attr-defined]
         SectionChunkingStrategy.chunk._logic_fingerprint,  # type: ignore[attr-defined]
         RegexChunkingStrategy.chunk._logic_fingerprint,  # type: ignore[attr-defined]
         build_chunk._logic_fingerprint,  # type: ignore[attr-defined]
+        make_group_chunks._logic_fingerprint,  # type: ignore[attr-defined]
     } <= _tracked_logic_fps
 
 
@@ -121,3 +125,83 @@ def test_should_make_node_group_and_text_chunks_via_build_chunk() -> None:
     assert text_chunk.id == cid("hello")
     assert node_chunk.start_line == 1
     assert group_chunk.end_line >= group_chunk.start_line
+
+
+def test_should_keep_blank_lines_between_grouped_definitions() -> None:
+    content = "LOW = 1\n\nHIGH = 9\n"
+    p = parsed(content)
+
+    (chunk,) = make_group_chunks(
+        p, [node_for(content, "LOW = 1"), node_for(content, "HIGH = 9")], "constant"
+    )
+
+    assert chunk.text == "LOW = 1\n\nHIGH = 9"
+    assert (chunk.start_line, chunk.end_line) == (1, 3)
+
+
+def test_should_start_a_new_group_chunk_where_other_code_sits_between() -> None:
+    content = (
+        "class Limits:\n    LOW = 1\n\n    def check(self): pass\n\n    HIGH = 9\n"
+    )
+    p = parsed(content)
+    low = node_for(content, "LOW = 1")
+    high = node_for(content, "HIGH = 9")
+
+    chunks = make_group_chunks(p, [low, high], "class_constant")
+
+    assert [(c.text, c.start_line, c.end_line) for c in chunks] == [
+        ("    LOW = 1", 2, 2),
+        ("    HIGH = 9", 6, 6),
+    ]
+
+
+def test_should_emit_a_shared_line_once_when_two_definitions_sit_on_it() -> None:
+    content = "A = 1; B = 2\n"
+    p = parsed(content)
+
+    (chunk,) = make_group_chunks(
+        p, [node_for(content, "A = 1"), node_for(content, "B = 2")], "constant"
+    )
+
+    assert chunk.text == "A = 1; B = 2"
+    assert (chunk.start_line, chunk.end_line) == (1, 1)
+
+
+def test_should_make_every_group_chunk_an_exact_slice_of_the_file() -> None:
+    content = "A = 1\n\nB = 2\n\ndef f(): pass\n\nC = 3\n\nD = 4\n"
+    p = parsed(content)
+    nodes = [node_for(content, text) for text in ("A = 1", "B = 2", "C = 3", "D = 4")]
+    source_lines: list[str] = content.split("\n")
+
+    chunks = make_group_chunks(p, nodes, "constant", max_chars=8)
+
+    assert len(chunks) > 2
+    for chunk in chunks:
+        assert (
+            chunk.text.split("\n")
+            == (source_lines[chunk.start_line - 1 : chunk.end_line])
+        )
+
+
+def test_should_record_exact_source_lines_when_chunk_text_differs() -> None:
+    content = "# Guide\n\nRun the tests.\n"
+    p = parsed(content, "doc.md", "markdown")
+    heading = cap(
+        "definition.section", node_for(content, "# Guide"), path="doc.md", key="Guide"
+    )
+
+    (chunk,) = chunk_file(p, [heading], SectionChunkingStrategy())
+
+    assert chunk.text.startswith("# Guide")
+    assert chunk.source_text == "\n".join(
+        content.split("\n")[chunk.start_line - 1 : chunk.end_line]
+    )
+
+
+def test_should_record_no_source_lines_when_chunk_text_is_the_source() -> None:
+    p = parsed("def foo(): pass\n")
+    captures = [cap("definition.function", node_for(p.content, "def foo(): pass"))]
+
+    (chunk,) = chunk_file(p, captures, AstChunkingStrategy())
+
+    assert chunk.source_text is None

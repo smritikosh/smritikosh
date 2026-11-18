@@ -135,15 +135,7 @@ class DuckDBAdapter(StorageAdapter):
                 chunk.id,
                 chunk.symbol,
                 chunk.path,
-                json.dumps(
-                    {
-                        "text": chunk.text,
-                        "chunk_kind": chunk.chunk_kind,
-                        "content_hash": chunk.content_hash,
-                        "start_line": chunk.start_line,
-                        "end_line": chunk.end_line,
-                    }
-                ),
+                json.dumps(self._chunk_metadata(chunk)),
             )
             for chunk in chunks
         ]
@@ -154,6 +146,20 @@ class DuckDBAdapter(StorageAdapter):
             """,
             rows,
         )
+
+    @staticmethod
+    def _chunk_metadata(chunk: Chunk) -> dict[str, object]:
+        """Return the stored fields of *chunk*, keeping source text only if set."""
+        metadata: dict[str, object] = {
+            "text": chunk.text,
+            "chunk_kind": chunk.chunk_kind,
+            "content_hash": chunk.content_hash,
+            "start_line": chunk.start_line,
+            "end_line": chunk.end_line,
+        }
+        if chunk.source_text is not None:
+            metadata["source_text"] = chunk.source_text
+        return metadata
 
     def delete_chunk_node(self, chunk_id: str) -> None:
         self.con.execute(

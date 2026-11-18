@@ -210,6 +210,7 @@ def make_node_chunks(
     )
 
 
+@sm.tracked  # source hash in _tracked_logic_fps — change here busts process_file memo
 def make_group_chunks(
     parsed: ParsedFile,
     nodes: list[TreeSitterNode],
@@ -217,22 +218,42 @@ def make_group_chunks(
     content_bytes: bytes | None = None,
     max_chars: int | None = None,
 ) -> list[Chunk]:
-    """Build Chunks by concatenating *nodes*, splitting if oversized.
+    """Build Chunks from runs of adjacent *nodes*, splitting if oversized.
 
     This is the path that produced the 190-line constants blob: every
     module-level constant in a file lands in one bucket, so the group is
     exactly the kind of chunk that outgrows the model's window.
+
+    Nodes separated only by blank lines share one chunk; any other line between
+    them starts a new one. Each chunk is the whole source lines it spans, so its
+    text runs exactly from ``start_line`` to ``end_line`` and can be mapped back
+    onto the file line by line.
     """
     raw = content_bytes if content_bytes is not None else parsed.content.encode()
-    texts = [extract_node_text(parsed, n, raw) for n in nodes]
-    return build_chunks(
-        parsed.path,
-        "\n".join(texts),
-        chunk_kind,
-        min(n.start_point[0] + 1 for n in nodes),
-        max(n.end_point[0] + 1 for n in nodes),
-        max_chars,
-    )
+    source_lines: list[str] = raw.decode().split("\n")
+    runs: list[list[int]] = []
+    for node in sorted(nodes, key=lambda n: n.start_byte):
+        first: int = node.start_point[0] + 1
+        last: int = node.end_point[0] + 1
+        if runs and all(
+            not source_lines[number - 1].strip()
+            for number in range(runs[-1][1] + 1, first)
+        ):
+            runs[-1][1] = max(runs[-1][1], last)
+        else:
+            runs.append([first, last])
+    return [
+        chunk
+        for first, last in runs
+        for chunk in build_chunks(
+            parsed.path,
+            "\n".join(source_lines[first - 1 : last]),
+            chunk_kind,
+            first,
+            last,
+            max_chars,
+        )
+    ]
 
 
 def make_text_chunks(

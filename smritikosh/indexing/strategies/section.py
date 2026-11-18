@@ -136,6 +136,16 @@ def _preferred_markdown_cut(window: str, minimum: int) -> int:
     return len(window)
 
 
+def _last_line(first_line: int, piece: str) -> int:
+    """Return the line *piece* ends on when it starts on *first_line*.
+
+    A final newline ends the piece's last line rather than opening another, so
+    a piece cut at a line boundary does not claim the first line of the next.
+    """
+    body: str = piece[:-1] if piece.endswith("\n") else piece
+    return first_line + body.count("\n")
+
+
 def _split_markdown(
     text: str,
     max_chars: int,
@@ -153,8 +163,7 @@ def _split_markdown(
             stop = start + _preferred_markdown_cut(window, minimum)
         piece = text[start:stop]
         first_line = text.count("\n", 0, start)
-        last_line = first_line + piece.count("\n")
-        windows.append((piece, first_line, last_line))
+        windows.append((piece, first_line, _last_line(first_line, piece)))
         start = stop
     return windows
 
@@ -218,8 +227,7 @@ def _token_split_block(
             best = _preferred_markdown_cut(window, minimum)
         piece = block.text[start : start + best]
         first = block.first_line + block.text.count("\n", 0, start)
-        last = first + piece.count("\n")
-        windows.append(_MarkdownBlock(piece, first, last))
+        windows.append(_MarkdownBlock(piece, first, _last_line(first, piece)))
         start += best
     return windows
 
@@ -390,7 +398,7 @@ def _markdown_text_chunks(
         )
     budget = None if max_chars is None else max(max_chars - len(prefix), 1)
     windows = (
-        [(text, 0, text.count("\n"))]
+        [(text, 0, _last_line(0, text))]
         if budget is None
         else _split_markdown(text, budget)
     )

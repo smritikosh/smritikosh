@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import duckdb
 import pytest
 
@@ -149,6 +151,23 @@ def test_upsert_chunk_nodes_is_idempotent(adapter: DuckDBAdapter) -> None:
 
 def test_upsert_chunk_nodes_no_op_on_empty_list(adapter: DuckDBAdapter) -> None:
     adapter.upsert_chunk_nodes([])  # must not raise
+
+
+def test_upsert_chunk_nodes_stores_source_text_only_when_present(
+    adapter: DuckDBAdapter,
+) -> None:
+    labelled = _chunk("labelled", text="# Guide\n\nRun it.")
+    labelled.source_text = "Run it."
+    adapter.upsert_chunk_nodes([labelled, _chunk("plain")])
+
+    stored: dict[str, dict] = {
+        row[0]: json.loads(row[1])
+        for row in adapter.con.execute(
+            "SELECT id, metadata FROM nodes WHERE kind = 'chunk'"
+        ).fetchall()
+    }
+    assert stored["labelled"]["source_text"] == "Run it."
+    assert "source_text" not in stored["plain"]
 
 
 # ── delete_chunk_node ───────────────────────────────────────────────────────

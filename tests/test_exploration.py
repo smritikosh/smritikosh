@@ -32,11 +32,13 @@ def _make_db(
     tmp_path: Path,
     chunks: list[tuple[str, str, int, int, str, str | None]],
     vectors: dict[str, list[float]] | None = None,
+    metadata: dict[str, dict[str, object]] | None = None,
 ) -> str:
     """Write an index of ``(id, path, start, end, text, symbol)`` chunks.
 
     Pass *vectors* to make the index searchable; without them only the
-    non-semantic reads have anything to work with.
+    non-semantic reads have anything to work with. *metadata* adds stored
+    fields per chunk id, such as ``source_text``.
     """
     db_path: Path = tmp_path / "chunks.duckdb"
     connection = duckdb.connect(str(db_path))
@@ -67,6 +69,7 @@ def _make_db(
                         "end_line": end,
                         "text": text,
                         "chunk_kind": "function",
+                        **(metadata or {}).get(chunk_id, {}),
                     }
                 ),
             )
@@ -505,6 +508,47 @@ def test_should_skip_chunks_whose_text_does_not_span_their_lines(
 
     # Assert
     assert [(line.line_number, line.text) for line in lines] == [(4, "middle")]
+
+
+def test_should_rebuild_lines_from_source_text_when_chunk_text_differs(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    db_path: str = _make_db(
+        tmp_path,
+        [("chunk:doc", "docs/a.md", 3, 4, "# Guide\n\nRun the tests.\n", None)],
+        metadata={"chunk:doc": {"source_text": "Run the tests.\n"}},
+    )
+    explorer = ReadOnlyExplorer(db_path)
+
+    # Act
+    lines = explorer.get_source_lines("docs/a.md", start_line=3, end_line=4)
+    explorer.close()
+
+    # Assert
+    assert [(line.line_number, line.text) for line in lines] == [
+        (3, "Run the tests."),
+        (4, ""),
+    ]
+
+
+def test_should_report_exact_lines_for_matches_in_source_text(tmp_path: Path) -> None:
+    # Arrange
+    db_path: str = _make_db(
+        tmp_path,
+        [("chunk:doc", "docs/a.md", 3, 4, "# Guide\n\nRun the tests.\n", None)],
+        metadata={"chunk:doc": {"source_text": "Run the tests.\n"}},
+    )
+    explorer = ReadOnlyExplorer(db_path)
+
+    # Act
+    matches = explorer.find_text_lines("tests")
+    explorer.close()
+
+    # Assert
+    assert [(m.line_number, m.text, m.exact_line) for m in matches] == [
+        (3, "Run the tests.", True)
+    ]
 
 
 def test_should_reject_reversed_line_range(indexed_db: str) -> None:

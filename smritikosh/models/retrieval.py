@@ -57,6 +57,8 @@ class IndexedChunk:
     #: Definition this chunk came from; None for chunks that cover no single
     #: definition, and for chunks written before symbols were recorded.
     symbol: str | None = None
+    #: The file's own lines when *text* differs from them; None otherwise.
+    source_text: str | None = None
 
 
 @dataclass(frozen=True)

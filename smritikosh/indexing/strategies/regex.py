@@ -30,9 +30,9 @@ class RegexChunkingStrategy:
         matches = list(self._pattern.finditer(content))
 
         if not matches:
-            lines = content.splitlines()
+            text = content.rstrip("\n")
             return make_text_chunks(
-                parsed, content, "regex", 1, max(len(lines), 1), self.max_chars
+                parsed, text, "regex", 1, text.count("\n") + 1, self.max_chars
             )
 
         chunks: list[Chunk] = []
@@ -44,7 +44,9 @@ class RegexChunkingStrategy:
             if not section.strip():
                 continue
             start_line = content[:start_pos].count("\n") + 1
-            end_line = max(content[:end_pos].count("\n"), start_line)
+            # Counted from the section itself, whose trailing blank lines were
+            # stripped, so the range ends on the section's last line.
+            end_line = start_line + section.count("\n")
             # The boundary the split matched is the section's own header —
             # "[tool.ruff]" in a TOML file — which is the nearest thing a
             # regex-chunked file has to a symbol name.

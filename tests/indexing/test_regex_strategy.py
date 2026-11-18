@@ -31,7 +31,7 @@ class TestRegexChunkingStrategy:
         chunks = self.strategy.chunk(p, [])
 
         assert len(chunks) == 1
-        assert chunks[0].text == content
+        assert chunks[0].text == content.rstrip("\n")
         assert chunks[0].chunk_kind == "regex"
 
     def test_captures_are_ignored(self) -> None:
@@ -62,3 +62,31 @@ class TestRegexChunkingStrategy:
 
         assert len(chunks) == 1
         assert "dependencies" in chunks[0].text
+
+
+def _source_slice(content: str, start_line: int, end_line: int) -> list[str]:
+    return content.split("\n")[start_line - 1 : end_line]
+
+
+class TestRegexChunkLineRanges:
+    def setup_method(self) -> None:
+        self.strategy = RegexChunkingStrategy(r"^\[+[^\]]+\]")
+
+    def test_section_followed_by_blank_lines_ends_on_its_last_line(self) -> None:
+        content = "[tool.a]\nx = 1\n\n\n[tool.b]\ny = 2\n"
+
+        chunks = self.strategy.chunk(parsed(content), [])
+
+        assert [(c.start_line, c.end_line) for c in chunks] == [(1, 2), (5, 6)]
+        for chunk in chunks:
+            assert chunk.text.split("\n") == _source_slice(
+                content, chunk.start_line, chunk.end_line
+            )
+
+    def test_whole_file_fallback_text_spans_exactly_its_lines(self) -> None:
+        content = "no headers here\nsecond line\n"
+
+        (chunk,) = self.strategy.chunk(parsed(content), [])
+
+        assert (chunk.start_line, chunk.end_line) == (1, 2)
+        assert chunk.text.split("\n") == _source_slice(content, 1, 2)

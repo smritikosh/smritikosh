@@ -276,7 +276,7 @@ class DuckDBSourceReader(SourceReader):
         needle: str = text.lower()
         matches: dict[tuple[str, int, str], TextMatch] = {}
         for chunk in self.text_search(text, path=path, limit=limit):
-            chunk_lines: list[str] = chunk.text.split("\n")
+            chunk_lines: list[str] = self._source(chunk).split("\n")
             # A grouped chunk concatenates definitions that are not adjacent in
             # the file, so its text does not line up with the lines it claims.
             # Its start line is then the closest honest anchor available.
@@ -436,7 +436,7 @@ class DuckDBSourceReader(SourceReader):
         )
         lines: dict[int, str] = {}
         for chunk in chunks:
-            chunk_lines: list[str] = chunk.text.split("\n")
+            chunk_lines: list[str] = self._source(chunk).split("\n")
             if len(chunk_lines) != chunk.end_line - chunk.start_line + 1:
                 continue
             for offset, text in enumerate(chunk_lines):
@@ -636,6 +636,11 @@ class DuckDBSourceReader(SourceReader):
         """  # noqa: S608
 
     @staticmethod
+    def _source(chunk: IndexedChunk) -> str:
+        """Return the file's own lines for *chunk*, not its retrieval text."""
+        return chunk.source_text if chunk.source_text is not None else chunk.text
+
+    @staticmethod
     def _to_chunk(row: tuple[str, str | None, str, str]) -> IndexedChunk:
         """Build a chunk from an ``(id, name, path, metadata)`` row."""
         metadata: dict[str, object] = json.loads(row[3])
@@ -649,6 +654,11 @@ class DuckDBSourceReader(SourceReader):
             chunk_kind=(
                 str(metadata["chunk_kind"])
                 if metadata.get("chunk_kind") is not None
+                else None
+            ),
+            source_text=(
+                str(metadata["source_text"])
+                if metadata.get("source_text") is not None
                 else None
             ),
         )
