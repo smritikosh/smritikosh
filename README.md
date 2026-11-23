@@ -30,8 +30,19 @@ API keys, hosted vector databases, or sending source data off-device.
 No Python on the machine? `uv` brings its own.
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh   # Windows: docs.astral.sh/uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
 uv tool install smritikosh
+```
+
+On Windows, install `uv` from the PowerShell command in the
+[uv Windows docs](https://docs.astral.sh/uv/getting-started/installation/#windows),
+then the same commands. Search uses the portable ONNX runtime there; it does
+not start the Apple silicon warm server.
+
+```powershell
+uv tool install smritikosh
+smritikosh index .
+smritikosh explore search "authorization decision flow"
 ```
 
 Or `pipx install smritikosh`. Where the command is missing from PATH, `python -m smritikosh`

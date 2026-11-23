@@ -33,9 +33,12 @@ _SPAWN_TIMEOUT_S: Final = 10.0
 def warm_enabled() -> bool:
     """Whether searches should try the warm server.
 
-    On by default on Unix; off in CI (one-shot machines gain nothing from a
-    daemon) unless explicitly forced on.
+    On by default on Unix. Off on Windows: that Python has ``AF_UNIX`` but
+    not the ``fcntl`` lock the server needs, so forcing the server on would
+    crash at import. Off in CI unless explicitly forced on.
     """
+    if sys.platform == "win32":
+        return False
     setting = os.environ.get(daemon._WARM_ENV)
     if setting:
         return setting == "1"

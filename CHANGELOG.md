@@ -9,6 +9,11 @@ heading is renamed to the version and a fresh `Unreleased` opens above it.
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows installs resolve the portable ONNX embedder, and search no longer tries
+  to start the Unix warm server there.
+
 ## [1.0.1] - 2026-11-18
 
 ### Fixed

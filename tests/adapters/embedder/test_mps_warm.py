@@ -72,8 +72,11 @@ def warm(monkeypatch) -> Path:
     """Run the warm machinery against a tmp socket with a fake embedder.
 
     The socket lives in a short /tmp path: pytest's tmp_path easily exceeds the
-    104-byte AF_UNIX path limit on macOS.
+    104-byte AF_UNIX path limit on macOS. Skipped on Windows, where the server
+    cannot take its fcntl lock.
     """
+    if sys.platform == "win32":
+        pytest.skip("the warm server does not run on Windows")
     _FakeEmbedder.instances = []
     sock_path = Path(tempfile.mkdtemp(prefix="smri-warm-")) / "t.sock"
     monkeypatch.setattr(daemon, "_socket_path", lambda: sock_path)
@@ -107,7 +110,16 @@ def test_warm_enabled_by_default(monkeypatch) -> None:
     monkeypatch.delenv(daemon._WARM_ENV, raising=False)
     monkeypatch.delenv("CI", raising=False)
 
-    assert client.warm_enabled()
+    assert client.warm_enabled() is (sys.platform != "win32")
+
+
+def test_warm_stays_off_on_windows_even_when_forced(monkeypatch) -> None:
+    """Windows Python has AF_UNIX and no fcntl, so a forced server crashes."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setenv(daemon._WARM_ENV, "1")
+    monkeypatch.delenv("CI", raising=False)
+
+    assert client.warm_enabled() is False
 
 
 def test_warm_disabled_by_env(monkeypatch) -> None:
@@ -124,6 +136,7 @@ def test_warm_defaults_off_in_ci(monkeypatch) -> None:
     assert not client.warm_enabled()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix-only warm server")
 def test_warm_forced_on_overrides_ci(monkeypatch) -> None:
     monkeypatch.setenv(daemon._WARM_ENV, "1")
     monkeypatch.setenv("CI", "true")
@@ -134,6 +147,7 @@ def test_warm_forced_on_overrides_ci(monkeypatch) -> None:
 # ── _socket_path ──────────────────────────────────────────────────────────────
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix socket directory mode")
 def test_socket_path_is_versioned_and_user_private(monkeypatch, tmp_path) -> None:
     """The version in the name keeps upgraded clients off an old server."""
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
@@ -154,6 +168,7 @@ def warm_client(monkeypatch):
     return monkeypatch
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix-only warm server")
 def test_encode_queries_sends_raw_texts_to_the_server(warm_client) -> None:
     """The server applies the query instruction — the client must not."""
     sent: list[list[str]] = []
@@ -172,6 +187,7 @@ def test_encode_queries_sends_raw_texts_to_the_server(warm_client) -> None:
     assert sent == [["q1", "q2"]]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix-only warm server")
 def test_encode_queries_falls_back_in_process(warm_client) -> None:
     """A dead or hung server must never break search — just slow it down."""
 
@@ -187,6 +203,7 @@ def test_encode_queries_falls_back_in_process(warm_client) -> None:
     assert session.calls == [[CODE_QUERY_INSTRUCTION + "retry failed uploads"]]
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Unix-only warm server")
 def test_encode_documents_never_touches_the_server(warm_client) -> None:
     """Indexing batches stay in-process; the server is a search-time shortcut."""
     warm_client.setattr(
