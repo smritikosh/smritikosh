@@ -9,6 +9,7 @@ from smritikosh.models.types import SearchResult
 
 __all__ = [
     "CandidateScore",
+    "ExplainedHit",
     "HybridSearchOptions",
     "ImpactRow",
     "IndexInfo",
@@ -171,3 +172,14 @@ class SearchLocation:
     end_line: int
     symbol: str | None
     facets: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ExplainedHit:
+    """One search hit plus the ranks and chunk span behind the cited range."""
+
+    location: SearchLocation
+    dense_rank: int | None
+    lexical_rank: int | None
+    chunk_start_line: int
+    chunk_end_line: int

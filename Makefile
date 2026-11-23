@@ -53,7 +53,8 @@ FAST_TESTS := tests/engine/ tests/models/ tests/ports/ \
 	tests/adapters/embedder/test_query_prefixes.py \
 	tests/queries/ tests/indexing/ tests/retrieval/ \
 	tests/test_cli.py \
-	tests/test_exploration.py tests/test_exploration_cli.py
+	tests/test_exploration.py tests/test_exploration_cli.py \
+	tests/test_savings.py tests/test_warm_server_label.py
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 

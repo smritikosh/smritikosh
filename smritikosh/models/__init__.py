@@ -2,6 +2,7 @@
 
 from smritikosh.models.retrieval import (
     CandidateScore,
+    ExplainedHit,
     HybridSearchOptions,
     ImpactRow,
     IndexedChunk,
@@ -31,6 +32,7 @@ __all__ = [
     "Call",
     "CandidateScore",
     "Capture",
+    "ExplainedHit",
     "Chunk",
     "ChunkingStrategy",
     "Edge",

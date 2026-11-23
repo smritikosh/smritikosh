@@ -176,3 +176,27 @@ def test_should_return_locations_without_reading_source() -> None:
         (1, 2)
     ]
     assert not hasattr(locations[0], "source")
+
+
+def test_should_keep_the_chunk_span_when_a_hit_is_widened() -> None:
+    result = SearchResult(
+        "src/flow.py",
+        2,
+        2,
+        "    return",
+        0.9,
+        "function",
+        "load",
+    )
+    service = HybridSearchService(
+        (_Retriever(RetrievalChannel.DENSE, {"flow": [result]}),),
+        _Reader(),
+    )
+
+    hits = service.explained(("flow",), options=HybridSearchOptions(max_results=1))
+
+    assert len(hits) == 1
+    assert (hits[0].chunk_start_line, hits[0].chunk_end_line) == (2, 2)
+    assert (hits[0].location.start_line, hits[0].location.end_line) == (1, 2)
+    assert hits[0].dense_rank == 1
+    assert hits[0].lexical_rank is None

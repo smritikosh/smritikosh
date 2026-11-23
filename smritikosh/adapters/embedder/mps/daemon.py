@@ -44,11 +44,16 @@ def _idle_minutes_default() -> float:
         return _DEFAULT_IDLE_MINUTES
 
 
-def _socket_path() -> Path:
-    """User-private, version-stamped socket path (created on demand)."""
+def _socket_path(*, create: bool = True) -> Path:
+    """User-private, version-stamped socket path.
+
+    *create* makes the directory. Status checks pass ``create=False`` so
+    looking at the server does not create its folder.
+    """
     base = os.environ.get("XDG_RUNTIME_DIR")
     run_dir = (Path(base) if base else Path.home() / ".cache") / "smritikosh"
-    run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if create:
+        run_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     version = importlib.metadata.version("smritikosh")
     return run_dir / f"embed-{version}.sock"
 
